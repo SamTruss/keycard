@@ -1,0 +1,15 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  security:
+    uses: SamTruss/security-workflows/.github/workflows/security-scans.yml@v1
