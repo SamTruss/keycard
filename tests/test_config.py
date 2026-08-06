@@ -1,0 +1,116 @@
+"""Tests for config loading, room resolution, and edge cases."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from keycard.config import Config, RoomConfig, load
+
+
+def test_builtin_defaults_when_no_file(tmp_path: Path) -> None:
+    cfg = load(tmp_path / "nonexistent.toml")
+    assert "ubuntu" in cfg.rooms
+    assert "python" in cfg.rooms
+    assert "node" in cfg.rooms
+    assert cfg.default_room == "ubuntu"
+
+
+def test_resolve_known_username() -> None:
+    cfg = Config(
+        rooms={
+            "python": RoomConfig(name="python", image="python:3.12-slim"),
+            "ubuntu": RoomConfig(name="ubuntu", image="ubuntu:24.04"),
+        },
+        default_room="ubuntu",
+    )
+    room = cfg.resolve("python")
+    assert room is not None
+    assert room.image == "python:3.12-slim"
+
+
+def test_resolve_unknown_username_falls_back_to_default() -> None:
+    cfg = Config(
+        rooms={
+            "ubuntu": RoomConfig(name="ubuntu", image="ubuntu:24.04"),
+        },
+        default_room="ubuntu",
+    )
+    room = cfg.resolve("doesnotexist")
+    assert room is not None
+    assert room.name == "ubuntu"
+
+
+def test_resolve_returns_none_when_no_rooms() -> None:
+    cfg = Config(rooms={}, default_room="ubuntu")
+    assert cfg.resolve("anything") is None
+
+
+def test_load_custom_config(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+listen = ":3333"
+idle_timeout = "30m"
+default_room = "alpine"
+
+[rooms.alpine]
+image = "alpine:latest"
+memory = "512m"
+cpus = 1
+network = "none"
+
+[rooms.debian]
+image = "debian:bookworm"
+""",
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+    assert cfg.port == 3333
+    assert cfg.idle_timeout == "30m"
+    assert cfg.default_room == "alpine"
+    assert len(cfg.rooms) == 2
+
+    alpine = cfg.rooms["alpine"]
+    assert alpine.image == "alpine:latest"
+    assert alpine.memory == "512m"
+    assert alpine.cpus == 1
+    assert alpine.network == "none"
+
+    debian = cfg.rooms["debian"]
+    assert debian.image == "debian:bookworm"
+    assert debian.memory == ""
+
+
+def test_config_with_no_rooms_falls_back_to_builtins(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text('listen = ":4444"\n', encoding="utf-8")
+    cfg = load(toml)
+    assert "ubuntu" in cfg.rooms
+    assert "python" in cfg.rooms
+
+
+def test_host_and_port_parsing() -> None:
+    cfg = Config(listen=":2222")
+    assert cfg.host == ""
+    assert cfg.port == 2222
+
+    cfg = Config(listen="0.0.0.0:3333")
+    assert cfg.host == "0.0.0.0"
+    assert cfg.port == 3333
+
+
+def test_room_without_image_is_skipped(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[rooms.broken]
+memory = "1g"
+
+[rooms.valid]
+image = "ubuntu:24.04"
+""",
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+    assert "broken" not in cfg.rooms
+    assert "valid" in cfg.rooms

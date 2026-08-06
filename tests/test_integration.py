@@ -18,6 +18,7 @@ import asyncssh
 import pytest
 
 from keycard.backends.docker import DockerBackend
+from keycard.config import Config, RoomConfig
 from keycard.server import create_server
 
 IMAGE = "ubuntu:24.04"
@@ -60,14 +61,19 @@ async def keycard_server(tmp_path: Path) -> AsyncIterator[tuple[int, Path]]:
     authorized = tmp_path / "authorized_keys"
     authorized.write_bytes(client_key.export_public_key())
 
-    backend = DockerBackend()
-    server = await create_server(
-        host="127.0.0.1",
-        port=0,
-        image=IMAGE,
+    cfg = Config(
         authorized_keys=authorized,
         host_key=tmp_path / "host_key",
+        rooms={"ubuntu": RoomConfig(name="ubuntu", image=IMAGE)},
+        default_room="ubuntu",
+    )
+
+    backend = DockerBackend()
+    server = await create_server(
+        cfg,
         backend=backend,
+        host_override="127.0.0.1",
+        port_override=0,
     )
     port = next(iter(server.sockets)).getsockname()[1]
     try:

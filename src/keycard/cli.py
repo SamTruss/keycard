@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .server import AUTHORIZED_KEYS, HOST_KEY, serve
+from .config import load as load_config
 
 
 @click.group()
@@ -19,35 +19,20 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--host", default="", help="Address to bind. Default: all interfaces.")
-@click.option("--port", default=2222, show_default=True, help="Port to listen on.")
 @click.option(
-    "--image",
-    default="ubuntu:24.04",
-    show_default=True,
-    help="Image every room is built from. v1 serves one image for all usernames.",
-)
-@click.option(
-    "--authorized-keys",
+    "--config",
+    "config_path",
     type=click.Path(path_type=Path),
-    default=AUTHORIZED_KEYS,
-    show_default=True,
-    help="Public keys permitted to check in.",
+    default=None,
+    help="Path to keycard.toml.",
 )
-@click.option(
-    "--host-key",
-    type=click.Path(path_type=Path),
-    default=HOST_KEY,
-    show_default=True,
-    help="Server host key. Generated on first run.",
-)
+@click.option("--host", default=None, help="Address to bind. Overrides config.")
+@click.option("--port", default=None, type=int, help="Port to listen on. Overrides config.")
 @click.option("-v", "--verbose", is_flag=True, help="Debug logging.")
 def up(
-    host: str,
-    port: int,
-    image: str,
-    authorized_keys: Path,
-    host_key: Path,
+    config_path: Path | None,
+    host: str | None,
+    port: int | None,
     verbose: bool,
 ) -> None:
     """Run the keycard server."""
@@ -56,17 +41,46 @@ def up(
         format="%(asctime)s  keycard: %(message)s",
         datefmt="%H:%M:%S",
     )
+    cfg = load_config(config_path)
+    if host is not None:
+        cfg.listen = f"{host}:{cfg.port}"
+    if port is not None:
+        cfg.listen = f"{cfg.host}:{port}"
+
+    from .server import serve
+
     try:
-        asyncio.run(
-            serve(
-                host=host,
-                port=port,
-                image=image,
-                authorized_keys=authorized_keys,
-                host_key=host_key,
-            )
-        )
+        asyncio.run(serve(cfg))
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc)) from exc
     except KeyboardInterrupt:
         click.echo("\nkeycard: front desk closed")
+
+
+@main.command()
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to keycard.toml.",
+)
+def rooms(config_path: Path | None) -> None:
+    """List available rooms."""
+    cfg = load_config(config_path)
+    if not cfg.rooms:
+        click.echo("No rooms configured.")
+        return
+
+    max_name = max(len(r.name) for r in cfg.rooms.values())
+    for room in cfg.rooms.values():
+        default = " (default)" if room.name == cfg.default_room else ""
+        extras = []
+        if room.memory:
+            extras.append(f"mem={room.memory}")
+        if room.cpus:
+            extras.append(f"cpus={room.cpus}")
+        if room.network == "none":
+            extras.append("offline")
+        extra_str = f"  [{', '.join(extras)}]" if extras else ""
+        click.echo(f"  {room.name:<{max_name}}  {room.image}{default}{extra_str}")
