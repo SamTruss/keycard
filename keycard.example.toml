@@ -1,0 +1,36 @@
+# keycard configuration
+#
+# This file is entirely optional — keycard runs with sensible defaults.
+# Copy to ~/.config/keycard/keycard.toml to customise.
+
+# Address and port to listen on. Port 22 is normally taken by the system
+# sshd; overriding it will lock you out of your own host.
+listen = ":2222"
+
+# Public keys permitted to connect. Same format as OpenSSH authorized_keys.
+authorized_keys = "~/.config/keycard/authorized_keys"
+
+# Destroy a room after this long with no activity. Catches orphans left
+# behind by dropped connections.
+idle_timeout = "15m"
+
+# Rooms. Each key here becomes a valid SSH username:
+#   ssh -p 2222 python@yourhost
+
+[rooms.default]
+image = "ubuntu:24.04"
+
+[rooms.python]
+image = "python:3.12-slim"
+memory = "1g"
+cpus = 2
+
+[rooms.node]
+image = "node:22-slim"
+memory = "1g"
+
+[rooms.offline]
+# No outbound network. Good for running something you don't fully trust
+# — though see SECURITY.md on what v1 does and does not protect against.
+image = "ubuntu:24.04"
+network = "none"
