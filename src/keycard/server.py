@@ -107,6 +107,7 @@ async def create_server(
         server_host_keys=[str(host_key)],
         authorized_client_keys=str(authorized_keys),
         encoding=None,  # raw bytes; the pty does its own interpreting
+        line_editor=False,  # the container shell does its own line editing
     )
 
 
