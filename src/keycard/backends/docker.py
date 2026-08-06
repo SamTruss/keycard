@@ -35,9 +35,9 @@ EXIT_POLL = 0.05
 # Hardening applied to every room. None of this makes a container a security
 # boundary — see SECURITY.md — but it removes the obvious footguns.
 ROOM_DEFAULTS: dict[str, Any] = {
-    "command": ["/bin/sh", "-c", "exec bash -l 2>/dev/null || exec sh -l"],
-    "entrypoint": "",
-    "environment": {"TERM": "xterm-256color"},
+    "entrypoint": [],
+    "command": ["/bin/bash", "--login"],
+    "environment": {"TERM": "xterm-256color", "PS1": "\\u@\\h:\\w# "},
     "tty": True,
     "stdin_open": True,
     "detach": True,
