@@ -10,22 +10,22 @@ import asyncssh
 
 from .backends.base import Backend
 from .backends.docker import DockerBackend
+from .config import Config
 from .session import RoomSession
 
 log = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".config" / "keycard"
-HOST_KEY = CONFIG_DIR / "host_key"
-AUTHORIZED_KEYS = CONFIG_DIR / "authorized_keys"
 
 
 class KeycardServer(asyncssh.SSHServer):
     """One instance per connection."""
 
-    def __init__(self, backend: Backend, image: str) -> None:
+    def __init__(self, backend: Backend, config: Config) -> None:
         self._backend = backend
-        self._image = image
+        self._config = config
         self._peer = "?"
+        self._username = ""
 
     def connection_made(self, conn: asyncssh.SSHServerConnection) -> None:
         peer = conn.get_extra_info("peername")
@@ -36,8 +36,7 @@ class KeycardServer(asyncssh.SSHServer):
         log.info("connection closed: %s", self._peer)
 
     def begin_auth(self, username: str) -> bool:
-        # True means "authentication is required". Never return False here:
-        # that would let anyone in without a key.
+        self._username = username
         return True
 
     def password_auth_supported(self) -> bool:
@@ -47,10 +46,18 @@ class KeycardServer(asyncssh.SSHServer):
         return True
 
     def session_requested(self) -> RoomSession:
-        return RoomSession(self._backend, self._image)
+        room_cfg = self._config.resolve(self._username)
+        if room_cfg is None:
+            log.warning("no room for username %r", self._username)
+            # Fall through — session will fail and report cleanly.
+            image = "ubuntu:24.04"
+        else:
+            image = room_cfg.image
+            log.info("username %r → room %s (%s)", self._username, room_cfg.name, image)
+        return RoomSession(self._backend, image)
 
 
-def check_authorized_keys(path: Path = AUTHORIZED_KEYS) -> None:
+def check_authorized_keys(path: Path = CONFIG_DIR / "authorized_keys") -> None:
     """Fail fast, with the exact commands to fix it.
 
     Kept synchronous and called before the loop starts: an empty or missing
@@ -64,7 +71,7 @@ def check_authorized_keys(path: Path = AUTHORIZED_KEYS) -> None:
         )
 
 
-def ensure_host_key(path: Path = HOST_KEY) -> Path:
+def ensure_host_key(path: Path = CONFIG_DIR / "host_key") -> Path:
     """Generate a host key on first run.
 
     Written 0600 with the private key never leaving this directory. If the key
@@ -83,46 +90,43 @@ def ensure_host_key(path: Path = HOST_KEY) -> Path:
 
 
 async def create_server(
-    host: str = "",
-    port: int = 2222,
-    image: str = "ubuntu:24.04",
-    authorized_keys: Path = AUTHORIZED_KEYS,
-    host_key: Path = HOST_KEY,
+    config: Config,
     backend: Backend | None = None,
+    host_override: str | None = None,
+    port_override: int | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start listening and return the acceptor.
 
     Split out from serve() so tests can drive a real server on an ephemeral
     port without shelling out or blocking forever.
     """
-    check_authorized_keys(authorized_keys)
-    ensure_host_key(host_key)
+    check_authorized_keys(config.authorized_keys)
+    ensure_host_key(config.host_key)
     if backend is None:
         backend = DockerBackend()
 
+    host = host_override if host_override is not None else config.host
+    port = port_override if port_override is not None else config.port
+
     return await asyncssh.create_server(
-        lambda: KeycardServer(backend, image),
+        lambda: KeycardServer(backend, config),
         host,
         port,
-        server_host_keys=[str(host_key)],
-        authorized_client_keys=str(authorized_keys),
+        server_host_keys=[str(config.host_key)],
+        authorized_client_keys=str(config.authorized_keys),
         encoding=None,  # raw bytes; the pty does its own interpreting
         line_editor=False,  # the container shell does its own line editing
     )
 
 
-async def serve(
-    host: str = "",
-    port: int = 2222,
-    image: str = "ubuntu:24.04",
-    authorized_keys: Path = AUTHORIZED_KEYS,
-    host_key: Path = HOST_KEY,
-) -> None:
+async def serve(config: Config) -> None:
     backend: Backend = DockerBackend()
-    server = await create_server(host, port, image, authorized_keys, host_key, backend)
+    server = await create_server(config, backend)
 
-    log.info("keycard listening on port %s, serving %s", port, image)
-    log.info("try: ssh -p %s guest@localhost", port)
+    rooms = ", ".join(f"{r.name} ({r.image})" for r in config.rooms.values())
+    log.info("keycard listening on port %s", config.port)
+    log.info("rooms: %s (default: %s)", rooms, config.default_room)
+    log.info("try: ssh -p %s ubuntu@localhost", config.port)
 
     try:
         await server.wait_closed()
