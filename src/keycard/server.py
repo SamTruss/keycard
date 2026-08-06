@@ -82,18 +82,25 @@ def ensure_host_key(path: Path = HOST_KEY) -> Path:
     return path
 
 
-async def serve(
+async def create_server(
     host: str = "",
     port: int = 2222,
     image: str = "ubuntu:24.04",
     authorized_keys: Path = AUTHORIZED_KEYS,
     host_key: Path = HOST_KEY,
-) -> None:
+    backend: Backend | None = None,
+) -> asyncssh.SSHAcceptor:
+    """Start listening and return the acceptor.
+
+    Split out from serve() so tests can drive a real server on an ephemeral
+    port without shelling out or blocking forever.
+    """
     check_authorized_keys(authorized_keys)
     ensure_host_key(host_key)
-    backend: Backend = DockerBackend()
+    if backend is None:
+        backend = DockerBackend()
 
-    server = await asyncssh.create_server(
+    return await asyncssh.create_server(
         lambda: KeycardServer(backend, image),
         host,
         port,
@@ -101,6 +108,17 @@ async def serve(
         authorized_client_keys=str(authorized_keys),
         encoding=None,  # raw bytes; the pty does its own interpreting
     )
+
+
+async def serve(
+    host: str = "",
+    port: int = 2222,
+    image: str = "ubuntu:24.04",
+    authorized_keys: Path = AUTHORIZED_KEYS,
+    host_key: Path = HOST_KEY,
+) -> None:
+    backend: Backend = DockerBackend()
+    server = await create_server(host, port, image, authorized_keys, host_key, backend)
 
     log.info("keycard listening on port %s, serving %s", port, image)
     log.info("try: ssh -p %s guest@localhost", port)
