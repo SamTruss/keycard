@@ -62,6 +62,10 @@ ignore = ["S104"]
 python_version = "3.11"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["docker.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
