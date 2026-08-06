@@ -12,4 +12,4 @@ permissions:
 
 jobs:
   security:
-    uses: SamTruss/security-workflows/.github/workflows/security-scans.yml@v1
+    uses: SamTruss/security-workflows/.github/workflows/security-scans.yml@v1.0.1
