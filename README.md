@@ -1,81 +1,122 @@
+<div align="center">
+
 # keycard
 
-**Disposable SSH sandboxes. One command, zero setup.**
+### Disposable machines, on demand.
 
-```
-ssh -p 2222 python@yourhost
-```
+**One command. Zero setup. Gone when you're done.**
 
-You're now inside a fresh, empty container with Python installed. Install what you like, break what you like. Disconnect, and the whole thing is destroyed.
+[![CI](https://github.com/SamTruss/keycard/actions/workflows/ci.yml/badge.svg)](https://github.com/SamTruss/keycard/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#status)
 
-Your actual machine never knew it happened.
+</div>
 
 ---
 
-## Why
+```console
+$ ssh python@yourhost
 
-Trying out an unfamiliar script or tool leaves you with two bad options: run it on your own machine and clean up afterwards, or spend ten minutes provisioning a sandbox for a two-minute job. Most people pick the first and regret it.
+root@a4f9c2 :~#
+```
 
-`docker run -it --rm` gets you most of the way, but it's local-only and verbose. ContainerSSH does the right thing but needs real configuration before first use. Vagrant and multipass are VM-weight. Devcontainers are project-scoped, not ad-hoc.
+You're inside a brand new machine. Python's installed. Nothing else is.
 
-keycard is the trivial case nobody shipped: **ephemeral SSH sessions with no configuration.**
+Install what you like. Break what you like.
 
-## How it works
+Then close the window — and it never existed.
 
-keycard is an SSH server. The username you connect as selects the environment:
+---
 
-| You type | You get |
-| --- | --- |
-| `ssh python@host` | Fresh container, Python installed |
-| `ssh node@host` | Fresh container, Node.js installed |
-| `ssh ubuntu@host` | Plain empty Linux box |
+## The problem
 
-On connect, keycard authenticates your public key, spawns a container from the mapped image, allocates a PTY and attaches you. On disconnect, it tears the container down. An idle timeout reaps anything orphaned.
+You want to try something. A script a colleague sent. A tool you're not sure about. A dependency you'd rather not commit to.
 
-There is no client to install. Your existing `ssh` already speaks the protocol.
+Today you pick between two bad options:
 
-### Why a custom server?
+**Run it locally.** It works. It also leaves files, changes settings, and installs things you didn't ask for. Your machine is permanently a little bit dirtier.
 
-OpenSSH can only authenticate usernames that exist as system accounts, so dynamic usernames can't be done with `ForceCommand` or `AuthorizedKeysCommand` tricks. keycard is a purpose-built SSH server (Python + AsyncSSH) rather than a wrapper around OpenSSH. That's precisely what buys the zero-config UX — the username is resolved at auth time instead of being pre-provisioned.
+**Provision a sandbox first.** Safe. Also ten minutes of setup for a two-minute job — so you skip it, and do the first thing.
+
+There's no third option. There should be.
+
+## The fix
+
+```
+ssh <what-you-need>@yourhost
+```
+
+That's the whole interface. The word before the `@` is the request.
+
+| Command | What you get |
+| :-- | :-- |
+| `ssh ubuntu@host` | A clean Linux box |
+| `ssh python@host` | Python 3.12, nothing else |
+| `ssh node@host` | Node 22, nothing else |
+| `ssh offline@host` | Clean box, no network |
+
+Disconnect and it's destroyed. No cleanup. No leftovers. No cron job to reap it.
+
+## Why it feels like magic
+
+**Nothing to install.** No client, no CLI, no plugin. `ssh` is already on your machine and already speaks the protocol. keycard runs on the other end and does all the work.
+
+**Nothing to configure.** Sensible defaults out of the box. The config file exists, but it's opt-in. If setup were required, the whole point would be gone.
+
+**Nothing to remember.** Not a flag, not a subcommand, not a wizard. Just the name of what you want.
+
+> Under the hood, OpenSSH can only let in usernames that already exist as system accounts — so dynamic usernames aren't possible with config tricks. keycard is a purpose-built SSH server. That's exactly what buys the zero-config experience: your request is resolved at auth time instead of provisioned in advance.
+
+## Who it's for
+
+**Developers** who want to try things without sanding down their laptop.
+
+**Teachers and workshop runners** handing thirty people an identical clean environment with a single line on a slide.
+
+**Maintainers** who want a *"try it without installing anything"* link in their README.
 
 ## Status
 
-**Early development.** Not yet released. See [Roadmap](#roadmap).
+> [!WARNING]
+> **Pre-alpha.** Not released, not usable yet. This repo is scaffolding and intent.
 
-## Installation
+Building in the open. [Roadmap below](#roadmap) — issues and architectural pushback welcome while everything's still cheap to change.
 
-Not yet published. Once released:
+## Getting started
+
+Once released:
 
 ```bash
-pipx install keycard    # or
+pipx install keycard
+```
+```bash
 brew install keycard
 ```
 
-For now, from source:
+From source, today:
 
 ```bash
-git clone https://github.com/SamTruss/keycard
-cd keycard
+git clone https://github.com/SamTruss/keycard && cd keycard
 pip install -e .
 ```
 
-Requires Python 3.11+ and a working Docker or Podman daemon.
-
-## Quick start
+Then:
 
 ```bash
-# Authorise your key
+# Your key is your keycard
 mkdir -p ~/.config/keycard
 cp ~/.ssh/id_ed25519.pub ~/.config/keycard/authorized_keys
 
-# Run the server
 keycard serve
-
-# From anywhere
-ssh -p 2222 ubuntu@yourhost
 ```
 
-Tidier, via `~/.ssh/config` on the client:
+Requires Python 3.11+ and Docker or Podman.
+
+<details>
+<summary><b>Making it one word</b></summary>
+
+Port 22 belongs to your system sshd, so keycard listens on 2222. Bury it in `~/.ssh/config` on the client:
 
 ```
 Host sandbox
@@ -84,75 +125,84 @@ Host sandbox
   User python
 ```
 
-...then just `ssh sandbox`.
+Now it's just `ssh sandbox`.
+</details>
 
-## Configuration
+<details>
+<summary><b>Adding your own rooms</b></summary>
 
-Config is optional — keycard ships with working defaults. To customise, create `~/.config/keycard/keycard.toml`:
+`~/.config/keycard/keycard.toml` — optional, defaults work fine.
 
 ```toml
 listen = ":2222"
-authorized_keys = "~/.config/keycard/authorized_keys"
 idle_timeout = "15m"
-
-[rooms.default]
-image = "ubuntu:24.04"
 
 [rooms.python]
 image = "python:3.12-slim"
 memory = "1g"
 cpus = 2
 
-[rooms.node]
-image = "node:22-slim"
+[rooms.offline]
+image = "ubuntu:24.04"
 network = "none"
 ```
 
-Each `[rooms.*]` key becomes a valid SSH username.
+Every `[rooms.*]` key becomes a valid SSH username.
+</details>
 
-## Where to run it
+<details>
+<summary><b>Where to run it</b></summary>
 
-- **Your own laptop** — works, but you're not gaining much over `docker run`.
-- **A homelab box or spare server** — the sweet spot. Your laptop stays untouched; all mess is confined to a machine you don't care about.
-- **A cloud VM** — same, plus you can hand the address to other people and each gets their own isolated room. Useful for teaching, workshops, or offering a "try it without installing anything" sandbox for your project.
+**Your laptop** — works, but you're not gaining much over `docker run`.
 
-## Security
+**A homelab box** — the sweet spot. Your laptop stays pristine; the mess lives somewhere you don't care about.
+
+**A cloud VM** — same, but you can hand out the address and everyone gets their own room. This is where it stops being a personal convenience.
+</details>
+
+## Straight talk on security
 
 > [!IMPORTANT]
-> **v1 is a hygiene tool, not a security boundary.**
+> **v1 keeps your machine clean. It does not keep you safe from hostile code.**
 
-keycard v1 uses containers, which share a kernel with the host. Container escape is a real class of vulnerability. Do not use v1 to run software you believe to be actively hostile, and do not expose it to untrusted users on a host you care about.
+Containers share a kernel with the host, and escapes are a real, recurring class of bug. keycard can't fix that at the container layer, so it won't pretend to.
 
-It *is* appropriate for keeping your machine clean from software you broadly trust but don't want permanently installed.
+**Use it for:** software you broadly trust but don't want permanently installed.
 
-Stronger isolation via Firecracker microVMs is planned for v2. The stronger claim will not be made until it lands.
+**Don't use it for:** anything you actually believe is malicious, or handing shells to people you don't trust on a host you care about.
 
-Current hardening: public-key authentication only (no passwords), no Docker socket passthrough, no host bind mounts by default, dropped capabilities, and optional `network = "none"` per room.
+Firecracker microVMs are planned for v2, and that's when the stronger claim gets made — not before. Overstating this would be the easiest way to get someone hurt.
 
-See [SECURITY.md](SECURITY.md) to report a vulnerability.
+Shipping today: pubkey auth only, no Docker socket passthrough, no host mounts, dropped capabilities, optional per-room network isolation. Full threat model in [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
-**v1 — Docker/Podman backend**
-- [ ] SSH server with pubkey auth
+**v1 — Docker / Podman**
+
+- [ ] SSH server, pubkey auth
 - [ ] Username → image resolution
-- [ ] PTY allocation, window resize, exit code propagation
+- [ ] PTY, resize, exit codes
 - [ ] Teardown on disconnect
-- [ ] Idle timeout reaper
-- [ ] Per-room resource caps (CPU, memory, pids)
-- [ ] `--keep` pause-instead-of-destroy for reconnect windows
-- [ ] Homebrew formula + PyPI release
+- [ ] Idle reaper
+- [ ] Per-room CPU / memory / pid caps
+- [ ] `--keep` for reconnect windows
+- [ ] PyPI + Homebrew
 
-**v2 — Firecracker backend**
-- [ ] Backend interface abstraction (design for this from day one)
-- [ ] microVM provisioning, rootfs images, tap networking
+**v2 — Firecracker**
 
-**Explicitly out of scope for v1:** port forwarding, SFTP/scp, multi-user accounts, persistent volumes, web UI.
+- [ ] Backend abstraction
+- [ ] microVM provisioning, rootfs, tap networking
+
+**Deliberately not building:** port forwarding, SFTP, persistent volumes, multi-user accounts, web UI. Each is defensible alone; together they'd make keycard a platform, and platforms need configuring.
 
 ## Contributing
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The project is early enough that architectural input is as valuable as code.
+Early enough that opinions are worth as much as commits. [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Licence
+<div align="center">
 
-MIT — see [LICENSE](LICENSE).
+---
+
+MIT © [Sam Truss](https://github.com/SamTruss)
+
+</div>
