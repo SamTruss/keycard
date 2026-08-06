@@ -494,37 +494,53 @@ document.querySelectorAll('.copy').forEach(function(b){
       busy=false,timers=[],
       reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 
+  // Each line is a list of [text, className] tokens. Rendered as DOM nodes
+  // with textContent, so no markup is ever parsed from a string.
+  var CUR='\u0000cursor';
+
   var enter=[
-    ['<span class="dim">$</span> ssh -p 2222 <span class="g">python</span>@yourhost',0],
-    ['<span class="dim">keycard: key accepted · room 101</span>',420],
-    ['<span class="dim">keycard: pulling python:3.12-slim</span>',760],
-    ['<span class="dim">keycard: container up · pty attached</span>',1180],
-    ['',1400],
-    ['<span class="y">root@a4f9c2</span>:<span class="g">~</span># python -V',1700],
-    ['Python 3.12.7',2100],
-    ['<span class="y">root@a4f9c2</span>:<span class="g">~</span># pip install requests',2400],
-    ['<span class="dim">Successfully installed requests-2.32.3</span>',2900],
-    ['<span class="y">root@a4f9c2</span>:<span class="g">~</span># <span class="cur"></span>',3200]
+    [[['$ ','dim'],['ssh -p 2222 ',''],['python','g'],['@yourhost','']],0],
+    [[['keycard: key accepted \u00b7 room 101','dim']],420],
+    [[['keycard: pulling python:3.12-slim','dim']],760],
+    [[['keycard: container up \u00b7 pty attached','dim']],1180],
+    [[],1400],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# python -V','']],1700],
+    [[['Python 3.12.7','']],2100],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# pip install requests','']],2400],
+    [[['Successfully installed requests-2.32.3','dim']],2900],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# ',''],[CUR,'']],3200]
   ];
   var leave=[
-    ['<span class="y">root@a4f9c2</span>:<span class="g">~</span># exit',0],
-    ['<span class="dim">keycard: connection closed</span>',400],
-    ['<span class="r">keycard: room 101 destroyed</span>',800],
-    ['',1050],
-    ['<span class="dim">Nothing was written to your machine.</span>',1300],
-    ['<span class="dim">$</span> <span class="cur"></span>',1600]
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# exit','']],0],
+    [[['keycard: connection closed','dim']],400],
+    [[['keycard: room 101 destroyed','r']],800],
+    [[],1050],
+    [[['Nothing was written to your machine.','dim']],1300],
+    [[['$ ','dim'],[CUR,'']],1600]
   ];
+
+  function render(rows){
+    tb.textContent='';
+    rows.forEach(function(tokens,i){
+      if(i)tb.appendChild(document.createTextNode('\n'));
+      tokens.forEach(function(tok){
+        var el=document.createElement('span');
+        if(tok[0]===CUR){el.className='cur';}
+        else{el.textContent=tok[0];if(tok[1])el.className=tok[1];}
+        tb.appendChild(el);
+      });
+    });
+    tb.scrollTop=tb.scrollHeight;
+  }
 
   function clear(){timers.forEach(clearTimeout);timers=[]}
 
   function play(seq,done){
-    clear();tb.innerHTML='';busy=true;
-    var lines=[];
+    clear();tb.textContent='';busy=true;
+    var rows=[];
     seq.forEach(function(row){
       timers.push(setTimeout(function(){
-        lines.push(row[0]);
-        tb.innerHTML=lines.join('\n');
-        tb.scrollTop=tb.scrollHeight;
+        rows.push(row[0]);render(rows);
       },reduce?0:row[1]));
     });
     var end=reduce?30:seq[seq.length-1][1]+140;
@@ -534,7 +550,7 @@ document.querySelectorAll('.copy').forEach(function(b){
   bIn.addEventListener('click',function(){
     if(busy||rig.dataset.state==='live')return;
     rig.dataset.state='live';led.dataset.s='live';
-    tt.textContent='room 101 — python:3.12-slim';
+    tt.textContent='room 101 \u2014 python:3.12-slim';
     bIn.disabled=true;
     play(enter,function(){bOut.disabled=false});
   });
@@ -542,7 +558,7 @@ document.querySelectorAll('.copy').forEach(function(b){
   bOut.addEventListener('click',function(){
     if(busy||rig.dataset.state!=='live')return;
     led.dataset.s='gone';bOut.disabled=true;
-    tt.textContent='local — zsh';
+    tt.textContent='local \u2014 zsh';
     play(leave,function(){
       rig.dataset.state='idle';led.dataset.s='idle';bIn.disabled=false;
     });
