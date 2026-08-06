@@ -1,0 +1,15 @@
+{
+  "name": "keycard",
+  "short_name": "keycard",
+  "description": "Disposable machines, on demand. Ephemeral SSH sandboxes with zero setup.",
+  "start_url": "/keycard/",
+  "scope": "/keycard/",
+  "display": "standalone",
+  "background_color": "#14121B",
+  "theme_color": "#14121B",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
