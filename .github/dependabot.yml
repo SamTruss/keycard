@@ -6,10 +6,20 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     commit-message:
       prefix: "deps"
+    groups:
+      dev-tooling:
+        dependency-type: "development"
+        patterns: ["*"]
+      runtime:
+        dependency-type: "production"
+        patterns: ["*"]
