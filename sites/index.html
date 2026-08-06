@@ -3,15 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>No such room — keycard</title>
-<meta name="robots" content="noindex">
+<title>keycard — disposable machines, on demand</title>
+<meta name="description" content="keycard hands you a clean machine over SSH, then destroys it the moment you disconnect. No client to install, no config to write.">
 <meta name="theme-color" content="#14121B">
+<link rel="canonical" href="https://samtruss.github.io/keycard/">
+
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon.ico" sizes="32x32">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+
+<meta property="og:site_name" content="keycard">
+<meta property="og:title" content="keycard — disposable machines, on demand">
+<meta property="og:description" content="Check in. Make a mess. Check out. Ephemeral SSH sandboxes with zero setup.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://samtruss.github.io/keycard/">
+<meta property="og:image" content="https://samtruss.github.io/keycard/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="keycard — check in, make a mess, check out.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="keycard — disposable machines, on demand">
+<meta name="twitter:description" content="Check in. Make a mess. Check out. Ephemeral SSH sandboxes with zero setup.">
+<meta name="twitter:image" content="https://samtruss.github.io/keycard/og-card.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --ground:#14121B;
@@ -282,55 +301,288 @@ footer{border-top:1px solid var(--line);padding:30px 0 46px}
 .foot a:hover{color:var(--paper)}
 .foot-l{display:flex;gap:22px}
 </style>
-<style>
-.lost{min-height:78vh;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding-block:clamp(60px,10vw,120px)}
-.lost h1{font-size:clamp(2.4rem,6.5vw,4.4rem);max-width:18ch}
-.hanger{
-  border:1px solid rgba(201,162,39,.32);border-radius:10px;
-  background:linear-gradient(180deg,rgba(201,162,39,.07),transparent);
-  padding:22px 24px;margin:8px 0 34px;max-width:520px;
-}
-.hanger p{margin:0;font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.8}
-.back{
-  font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
-  background:var(--brass);color:#171208;font-weight:700;text-decoration:none;
-  padding:12px 20px;border-radius:5px;display:inline-block;
-}
-.back:hover{filter:brightness(1.1)}
-</style>
 </head>
 <body>
 <div class="layer">
 
 <nav class="nav">
   <div class="wrap nav-in">
-    <a class="mark" href="./">keycard</a>
+    <a class="mark" href="#top">keycard</a>
     <div class="nav-links">
-      <span class="nav-tag">404</span>
+      <a href="#rooms">Rooms</a>
+      <a href="#safety">Safety</a>
+      <span class="nav-tag">pre-alpha</span>
       <a class="nav-gh" href="https://github.com/SamTruss/keycard">GitHub</a>
     </div>
   </div>
 </nav>
 
-<main class="wrap lost">
-  <p class="eyebrow">No such room</p>
-  <h1>That door doesn&rsquo;t <em>open.</em></h1>
-  <div class="hanger">
-    <p>keycard: room not found<br>keycard: check the number and try again</p>
+<header class="hero wrap" id="top">
+  <p class="eyebrow">Disposable machines, on demand</p>
+  <h1>Check in. Make a mess. <em>Check out.</em></h1>
+  <p class="lede">
+    keycard hands you a clean machine over SSH, then destroys it the second you
+    disconnect. Nothing to install, nothing to configure, nothing left behind.
+    <b>Your laptop never finds out.</b>
+  </p>
+
+  <div class="cmd">
+    <code id="cmd-1">ssh -p 2222 <span class="u">python</span><span class="p">@</span>yourhost</code>
+    <button class="copy" data-copy="cmd-1">Copy</button>
   </div>
-  <a class="back" href="./">Back to the front desk</a>
-</main>
+  <p class="microline">
+    Docker or Podman · Python 3.11+ · MIT · <a href="https://github.com/SamTruss/keycard">building in the open</a>
+  </p>
+
+  <dl class="facts">
+    <div class="fact"><dt>1</dt><dd>command to a shell</dd></div>
+    <div class="fact"><dt>0</dt><dd>files left behind</dd></div>
+    <div class="fact"><dt>0</dt><dd>clients to install</dd></div>
+    <div class="fact"><dt>v0.0.1</dt><dd>pre-alpha</dd></div>
+  </dl>
+</header>
+
+<section class="stage wrap">
+  <div class="stage-head">
+    <span class="stage-label">The front desk</span>
+    <span class="hint">Swipe the card ↓</span>
+  </div>
+
+  <div class="rig" id="rig" data-state="idle">
+    <aside class="reader">
+      <div class="reader-top"><span>Reader</span><span class="led" id="led" data-s="idle"></span></div>
+      <div class="card" id="card">
+        <span class="card-brand">keycard</span>
+        <span class="card-no">RM 101</span>
+      </div>
+      <div class="reader-actions">
+        <button class="btn btn-in" id="in">Swipe to enter</button>
+        <button class="btn btn-out" id="out" disabled>Check out</button>
+      </div>
+      <p class="reader-note">Your SSH public key is the card. No key, no room.</p>
+    </aside>
+
+    <div class="term">
+      <div class="term-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="term-title" id="tt">local — zsh</span>
+      </div>
+      <div class="term-body" id="tb"><span class="dim">$</span> <span class="cur"></span></div>
+    </div>
+  </div>
+
+  <p class="caption">
+    A real sequence, not a video. <b>Swipe</b> and a container is built, a terminal
+    is attached, and you're inside. <b>Check out</b> and it's destroyed — the same
+    thing that happens automatically when your connection drops.
+  </p>
+</section>
+
+<section class="rooms wrap" id="rooms">
+  <div class="stage-head">
+    <span class="stage-label">The rooms</span>
+    <span class="hint">The username is the request</span>
+  </div>
+
+  <div class="rooms-grid">
+    <article class="room">
+      <p class="plate">RM 101</p>
+      <h3>Ask by name.</h3>
+      <p>Whatever you type before the <code>@</code> is the environment you get. No flags, no subcommands, no wizard — just the name of the thing you need.</p>
+      <div class="room-demo">
+        <div>ssh <span class="u">ubuntu</span>@host <span class="y">→</span> clean Linux</div>
+        <div>ssh <span class="u">python</span>@host <span class="y">→</span> Python 3.12</div>
+        <div>ssh <span class="u">node</span>@host <span class="y">→</span> Node 22</div>
+      </div>
+    </article>
+
+    <article class="room">
+      <p class="plate">RM 102</p>
+      <h3>Housekeeping is automatic.</h3>
+      <p>Disconnect and the room is destroyed. Drop your connection instead and an idle timer catches it. There is no cleanup step, because there is nothing to clean.</p>
+      <div class="room-demo">
+        <div><span class="y">disconnect</span> → destroyed</div>
+        <div><span class="y">15m idle</span> → reaped</div>
+        <div><span class="y">--keep</span> → paused, not gone</div>
+      </div>
+    </article>
+
+    <article class="room">
+      <p class="plate">RM 103</p>
+      <h3>You already have the client.</h3>
+      <p>Nothing to install on the machine you're sitting at. <code>ssh</code> shipped with your OS and already speaks the protocol — keycard is simply what answers on the other end.</p>
+      <div class="room-demo">
+        <div class="dim">~/.ssh/config</div>
+        <div>Host <span class="u">sandbox</span></div>
+        <div>&nbsp;&nbsp;HostName yourhost</div>
+        <div>&nbsp;&nbsp;Port 2222</div>
+      </div>
+    </article>
+
+    <article class="room">
+      <p class="plate">RM 104</p>
+      <h3>Hand out the address.</h3>
+      <p>Run it on a box you don't care about and everyone who connects gets their own room. Thirty students, one line on a slide, identical environments.</p>
+      <div class="room-demo">
+        <div><span class="u">ana</span>@host <span class="y">→</span> rm 1 · isolated</div>
+        <div><span class="u">ben</span>@host <span class="y">→</span> rm 2 · isolated</div>
+        <div><span class="u">cara</span>@host <span class="y">→</span> rm 3 · isolated</div>
+      </div>
+    </article>
+
+    <article class="suite">
+      <p class="plate">RM 105 — under renovation</p>
+      <h3><span class="redact">████████</span> microVMs, v2.</h3>
+      <p>
+        v1 runs on containers, which is enough to keep your machine clean. Real
+        isolation needs Firecracker, and that's what v2 is for. It isn't built yet,
+        so the page won't pretend otherwise — <a href="https://github.com/SamTruss/keycard#roadmap" style="color:var(--brass)">the roadmap is public</a>.
+      </p>
+    </article>
+  </div>
+</section>
+
+<section class="placard-sec wrap" id="safety">
+  <div class="placard">
+    <p class="placard-tag">Please read before entering</p>
+    <h2>v1 keeps your machine clean. It does not keep you safe from hostile code.</h2>
+    <p>
+      Containers share a kernel with the host, and escapes are a real, recurring
+      class of bug. keycard can't fix that at the container layer, so it won't
+      claim to.
+    </p>
+    <div class="split">
+      <div class="yes">
+        <span>Good for</span>
+        <p>Software you broadly trust but don't want permanently installed. Throwaway tests. Teaching. Clean-room reproductions.</p>
+      </div>
+      <div class="no">
+        <span>Not for</span>
+        <p>Anything you actually believe is malicious, or handing shells to people you don't trust on a host you care about.</p>
+      </div>
+    </div>
+    <p>
+      Shipping today: <b>public-key auth only</b>, no Docker socket passthrough,
+      no host mounts, dropped capabilities, optional per-room network isolation.
+      The full threat model is in
+      <a href="https://github.com/SamTruss/keycard/blob/main/SECURITY.md" style="color:var(--brass)">SECURITY.md</a>.
+    </p>
+  </div>
+</section>
+
+<section class="outro wrap">
+  <h2>Give it somewhere to <em>disappear.</em></h2>
+  <p>Point it at a spare box. Everything else about your setup stays exactly as it is.</p>
+  <div class="cmd">
+    <code id="cmd-2">pipx install keycard &amp;&amp; keycard serve</code>
+    <button class="copy" data-copy="cmd-2">Copy</button>
+  </div>
+  <p class="microline">Not yet published — <a href="https://github.com/SamTruss/keycard">install from source</a></p>
+</section>
 
 <footer>
   <div class="wrap foot">
     <div class="foot-l">
       <a href="https://github.com/SamTruss/keycard">github</a>
       <a href="https://github.com/SamTruss/keycard/blob/main/SECURITY.md">security</a>
+      <a href="https://github.com/SamTruss/keycard/blob/main/CONTRIBUTING.md">contributing</a>
     </div>
-    <div>v0.0.1 &middot; MIT &middot; built in the terminal</div>
+    <div>v0.0.1 · MIT · built in the terminal</div>
   </div>
 </footer>
 
 </div>
+
+<script>
+// copy buttons
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click',function(){
+    var t=document.getElementById(b.dataset.copy);
+    navigator.clipboard.writeText(t.innerText).then(function(){
+      b.textContent='Copied';b.dataset.done='1';
+      setTimeout(function(){b.textContent='Copy';b.dataset.done='';},1600);
+    });
+  });
+});
+
+// the reader
+(function(){
+  var rig=document.getElementById('rig'),led=document.getElementById('led'),
+      tb=document.getElementById('tb'),tt=document.getElementById('tt'),
+      bIn=document.getElementById('in'),bOut=document.getElementById('out'),
+      busy=false,timers=[],
+      reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+  // Each line is a list of [text, className] tokens. Rendered as DOM nodes
+  // with textContent, so no markup is ever parsed from a string.
+  var CUR='\u0000cursor';
+
+  var enter=[
+    [[['$ ','dim'],['ssh -p 2222 ',''],['python','g'],['@yourhost','']],0],
+    [[['keycard: key accepted \u00b7 room 101','dim']],420],
+    [[['keycard: pulling python:3.12-slim','dim']],760],
+    [[['keycard: container up \u00b7 pty attached','dim']],1180],
+    [[],1400],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# python -V','']],1700],
+    [[['Python 3.12.7','']],2100],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# pip install requests','']],2400],
+    [[['Successfully installed requests-2.32.3','dim']],2900],
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# ',''],[CUR,'']],3200]
+  ];
+  var leave=[
+    [[['root@a4f9c2','y'],[':',''],['~','g'],['# exit','']],0],
+    [[['keycard: connection closed','dim']],400],
+    [[['keycard: room 101 destroyed','r']],800],
+    [[],1050],
+    [[['Nothing was written to your machine.','dim']],1300],
+    [[['$ ','dim'],[CUR,'']],1600]
+  ];
+
+  function render(rows){
+    tb.textContent='';
+    rows.forEach(function(tokens,i){
+      if(i)tb.appendChild(document.createTextNode('\n'));
+      tokens.forEach(function(tok){
+        var el=document.createElement('span');
+        if(tok[0]===CUR){el.className='cur';}
+        else{el.textContent=tok[0];if(tok[1])el.className=tok[1];}
+        tb.appendChild(el);
+      });
+    });
+    tb.scrollTop=tb.scrollHeight;
+  }
+
+  function clear(){timers.forEach(clearTimeout);timers=[]}
+
+  function play(seq,done){
+    clear();tb.textContent='';busy=true;
+    var rows=[];
+    seq.forEach(function(row){
+      timers.push(setTimeout(function(){
+        rows.push(row[0]);render(rows);
+      },reduce?0:row[1]));
+    });
+    var end=reduce?30:seq[seq.length-1][1]+140;
+    timers.push(setTimeout(function(){busy=false;done()},end));
+  }
+
+  bIn.addEventListener('click',function(){
+    if(busy||rig.dataset.state==='live')return;
+    rig.dataset.state='live';led.dataset.s='live';
+    tt.textContent='room 101 \u2014 python:3.12-slim';
+    bIn.disabled=true;
+    play(enter,function(){bOut.disabled=false});
+  });
+
+  bOut.addEventListener('click',function(){
+    if(busy||rig.dataset.state!=='live')return;
+    led.dataset.s='gone';bOut.disabled=true;
+    tt.textContent='local \u2014 zsh';
+    play(leave,function(){
+      rig.dataset.state='idle';led.dataset.s='idle';bIn.disabled=false;
+    });
+  });
+})();
+</script>
 </body>
 </html>
