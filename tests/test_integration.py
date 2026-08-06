@@ -87,6 +87,7 @@ async def _shell(port: int, key: Path) -> asyncssh.SSHClientConnection:
     )
 
 
+@pytest.mark.timeout(30)
 async def test_clean_exit_reports_status_and_destroys_room(
     keycard_server: tuple[int, Path],
 ) -> None:
@@ -95,16 +96,17 @@ async def test_clean_exit_reports_status_and_destroys_room(
 
     async with await _shell(port, key) as conn:
         proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
+        await asyncio.sleep(1)  # let the shell start
         proc.stdin.write("exit 3\n")
-        result = await proc.wait()
+        result = await asyncio.wait_for(proc.wait(), timeout=10)
 
-    # The real exit code must survive the bridge, not be flattened to zero.
     assert result.exit_status == 3
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
     assert _room_ids() == before, "room leaked after a clean exit"
 
 
+@pytest.mark.timeout(30)
 async def test_dropped_connection_destroys_room(
     keycard_server: tuple[int, Path],
 ) -> None:
@@ -113,20 +115,20 @@ async def test_dropped_connection_destroys_room(
 
     conn = await _shell(port, key)
     proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
+    await asyncio.sleep(2)  # let the shell start
     proc.stdin.write("sleep 300\n")
     await asyncio.sleep(2)  # let the room come up and the shell get busy
 
     assert _room_ids() != before, "no room was created"
 
-    # Yank the connection with the shell still running — the promise keycard
-    # is actually selling.
     conn.abort()
-    await conn.wait_closed()
+    await asyncio.wait_for(conn.wait_closed(), timeout=10)
 
     await asyncio.sleep(3)
     assert _room_ids() == before, "room leaked after a dropped connection"
 
 
+@pytest.mark.timeout(15)
 async def test_unauthorized_key_is_refused(keycard_server: tuple[int, Path]) -> None:
     port, _ = keycard_server
     stranger = asyncssh.generate_private_key("ssh-ed25519")
@@ -141,14 +143,16 @@ async def test_unauthorized_key_is_refused(keycard_server: tuple[int, Path]) -> 
         )
 
 
+@pytest.mark.timeout(30)
 async def test_resize_is_accepted(keycard_server: tuple[int, Path]) -> None:
     port, key = keycard_server
 
     async with await _shell(port, key) as conn:
         proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
+        await asyncio.sleep(1)
         proc.change_terminal_size(120, 40)
         await asyncio.sleep(1)
         proc.stdin.write("exit 0\n")
-        result = await proc.wait()
+        result = await asyncio.wait_for(proc.wait(), timeout=10)
 
     assert result.exit_status == 0
