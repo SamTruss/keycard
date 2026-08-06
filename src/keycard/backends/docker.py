@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import time
 from typing import Any
 
 import docker
@@ -24,6 +25,12 @@ from .base import Backend, Room
 log = logging.getLogger(__name__)
 
 READ_SIZE = 65536
+
+# How long to let a shell finish exiting on its own before killing it. On a
+# clean exit the container is already stopping when we get here; on a dropped
+# connection it is still happily running and needs a shove.
+EXIT_GRACE = 1.0
+EXIT_POLL = 0.05
 
 # Hardening applied to every room. None of this makes a container a security
 # boundary — see SECURITY.md — but it removes the obvious footguns.
@@ -76,16 +83,32 @@ class DockerRoom(Room):
             self._destroyed = True
 
         def _destroy() -> int:
+            # Deliberately not container.wait(): its timeout is the HTTP read
+            # timeout, so a still-running shell makes it block and then raise.
+            # Polling the state is cheap and gives us the real exit code.
             status = 0
+            deadline = time.monotonic() + EXIT_GRACE
             try:
-                result = self._container.wait(timeout=2)
-                status = int(result.get("StatusCode", 0))
-            except Exception:  # noqa: BLE001 - teardown must never raise
-                log.debug("could not read exit status", exc_info=True)
+                while True:
+                    self._container.reload()
+                    state = self._container.attrs.get("State", {})
+                    if not state.get("Running", False):
+                        status = int(state.get("ExitCode") or 0)
+                        break
+                    if time.monotonic() >= deadline:
+                        # Connection dropped with the shell still alive.
+                        self._container.kill()
+                        break
+                    time.sleep(EXIT_POLL)
+            except NotFound:
+                log.debug("container already gone")
+            except DockerException:
+                log.debug("could not read container state", exc_info=True)
+
             try:
                 self._container.remove(force=True)
             except (DockerException, NotFound):
-                log.debug("container already gone")
+                log.debug("container already removed")
             return status
 
         try:
