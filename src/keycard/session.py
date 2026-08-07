@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import asyncssh
@@ -19,15 +20,22 @@ from .config import RoomConfig
 
 log = logging.getLogger(__name__)
 
+# Exit status GNU coreutils' `timeout` uses when it kills a command — reusing
+# it here means an idle-reaped session is at least recognisable in scripts.
+IDLE_EXIT_STATUS = 124
+
 
 class RoomSession(asyncssh.SSHServerSession[bytes]):
-    def __init__(self, backend: Backend, room: RoomConfig) -> None:
+    def __init__(self, backend: Backend, room: RoomConfig, idle_seconds: float = 0.0) -> None:
         self._backend = backend
         self._room_cfg = room
+        self._idle_seconds = idle_seconds
         self._chan: asyncssh.SSHServerChannel[bytes] | None = None
         self._room: Room | None = None
         self._pump: asyncio.Task[None] | None = None
+        self._watchdog: asyncio.Task[None] | None = None
         self._size = (80, 24)
+        self._last_activity = time.monotonic()
 
     # -- channel lifecycle -------------------------------------------------
 
@@ -50,12 +58,14 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
 
     def session_started(self) -> None:
         self._pump = asyncio.create_task(self._run())
+        self._watchdog = asyncio.create_task(self._idle_watchdog())
 
     def terminal_size_changed(self, width: int, height: int, pixwidth: int, pixheight: int) -> None:
         if self._room is not None:
             asyncio.create_task(self._room.resize(width, height))  # noqa: RUF006
 
     def data_received(self, data: bytes, datatype: int | None) -> None:
+        self._last_activity = time.monotonic()
         if self._room is not None:
             asyncio.create_task(self._room.write(data))  # noqa: RUF006
 
@@ -67,6 +77,8 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         # which is exactly the guarantee keycard is selling.
         if self._pump is not None:
             self._pump.cancel()
+        if self._watchdog is not None:
+            self._watchdog.cancel()
         if self._room is not None:
             asyncio.create_task(self._checkout(self._room))  # noqa: RUF006
             self._room = None
@@ -91,6 +103,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
                 data = await room.read()
                 if not data:
                     break
+                self._last_activity = time.monotonic()
                 chan.write(data)
         except asyncio.CancelledError:
             raise
@@ -111,3 +124,35 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         except Exception:
             log.exception("checkout failed")
             return 1
+
+    # -- idle reaper ---------------------------------------------------------
+
+    async def _idle_watchdog(self) -> None:
+        """Reap the room after `idle_seconds` with no traffic either way.
+
+        A clean exit or a dropped TCP connection are both already handled by
+        `connection_lost`. This is the net under that: a connection that
+        never sends a FIN — a dead wifi link, a suspended laptop — leaves the
+        socket open and the room running forever without it.
+        """
+        if self._idle_seconds <= 0:
+            return
+
+        while True:
+            remaining = self._idle_seconds - (time.monotonic() - self._last_activity)
+            if remaining <= 0:
+                break
+            await asyncio.sleep(remaining)
+
+        log.info("room idle for %.0fs; reaping", self._idle_seconds)
+        chan = self._chan
+        if chan is not None and not chan.is_closing():
+            chan.write(b"\r\nkeycard: idle timeout -- room reaped\r\n")
+
+        if self._room is not None:
+            room, self._room = self._room, None
+            await self._checkout(room)
+
+        if chan is not None and not chan.is_closing():
+            chan.exit(IDLE_EXIT_STATUS)
+            chan.close()

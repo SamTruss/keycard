@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from keycard.config import Config, RoomConfig, load
+import pytest
+
+from keycard.config import Config, RoomConfig, load, parse_duration
 
 
 def test_builtin_defaults_when_no_file(tmp_path: Path) -> None:
@@ -97,6 +99,35 @@ def test_host_and_port_parsing() -> None:
     cfg = Config(listen="0.0.0.0:3333")
     assert cfg.host == "0.0.0.0"
     assert cfg.port == 3333
+
+
+@pytest.mark.parametrize(
+    ("spec", "seconds"),
+    [
+        ("15m", 900.0),
+        ("30s", 30.0),
+        ("1h", 3600.0),
+        ("2h", 7200.0),
+        ("90", 90.0),
+        ("0", 0.0),
+        ("", 0.0),
+    ],
+)
+def test_parse_duration(spec: str, seconds: float) -> None:
+    assert parse_duration(spec) == seconds
+
+
+def test_parse_duration_rejects_garbage() -> None:
+    with pytest.raises(ValueError):
+        parse_duration("soon")
+
+
+def test_idle_timeout_seconds_property() -> None:
+    cfg = Config(idle_timeout="15m")
+    assert cfg.idle_timeout_seconds == 900.0
+
+    cfg = Config(idle_timeout="0")
+    assert cfg.idle_timeout_seconds == 0.0
 
 
 def test_room_without_image_is_skipped(tmp_path: Path) -> None:

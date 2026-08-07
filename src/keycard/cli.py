@@ -51,7 +51,7 @@ def up(
 
     try:
         asyncio.run(serve(cfg))
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     except KeyboardInterrupt:
         click.echo("\nkeycard: front desk closed")

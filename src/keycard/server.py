@@ -53,7 +53,7 @@ class KeycardServer(asyncssh.SSHServer):
             room_cfg = RoomConfig(name="fallback", image="ubuntu:24.04")
         else:
             log.info("username %r → room %s (%s)", self._username, room_cfg.name, room_cfg.image)
-        return RoomSession(self._backend, room_cfg)
+        return RoomSession(self._backend, room_cfg, self._config.idle_timeout_seconds)
 
 
 def check_authorized_keys(path: Path = CONFIG_DIR / "authorized_keys") -> None:
@@ -101,6 +101,9 @@ async def create_server(
     """
     check_authorized_keys(config.authorized_keys)
     ensure_host_key(config.host_key)
+    # Accessed here, not just at connection time, so a malformed idle_timeout
+    # fails fast instead of surfacing on the first SSH connection.
+    log.debug("idle timeout: %.0fs (0 disables the reaper)", config.idle_timeout_seconds)
     if backend is None:
         backend = DockerBackend()
 
