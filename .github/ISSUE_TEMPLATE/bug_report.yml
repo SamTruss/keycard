@@ -1,0 +1,96 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. keycard is alpha software, so the more detail you give the faster this gets fixed.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Actual behaviour vs. what you expected.
+      placeholder: |
+        Actual: ...
+        Expected: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands run, room/username used, and anything else needed to reproduce it.
+      placeholder: |
+        1. keycard up
+        2. ssh -p 2222 python@host
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Output of `keycard up --verbose` if you have it. This will be formatted as code automatically.
+      render: shell
+
+  - type: input
+    id: keycard-version
+    attributes:
+      label: keycard version
+      description: Output of `keycard --version`
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Host OS
+      placeholder: e.g. Ubuntu 24.04, macOS 14
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: e.g. 3.12.4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Container backend
+      options:
+        - Docker
+        - Podman
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: backend-version
+    attributes:
+      label: Container backend version
+      placeholder: e.g. Docker 27.1.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: keycard.toml
+      description: Paste your config if you have one, or write "default" if you're running with no config. Redact any keys.
+      render: toml
+
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Confirmation
+      options:
+        - label: This is not a security vulnerability (see [SECURITY.md](https://github.com/SamTruss/keycard/blob/main/SECURITY.md) for how to report those privately)
+          required: true
