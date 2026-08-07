@@ -1,0 +1,23 @@
+[package]
+name = "keycard-guest-agent"
+version = "0.1.0"
+edition = "2021"
+description = "vsock pty agent that runs inside a keycard Firecracker room; see FIRECRACKER.md."
+publish = false
+
+[[bin]]
+name = "keycard-guest-agent"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+pty-process = { version = "0.5", features = ["async"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "sync"] }
+tokio-vsock = "0.7"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
