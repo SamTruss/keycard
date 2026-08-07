@@ -1,8 +1,9 @@
 # Firecracker Backend — Phased Plan
 
-Status: **Phase 0 done** (`guest-agent/`, merged in #31). Phases 1–5 not
-started. This is the roadmap referenced by `SCOPE.md`'s v2 section, written
-down for the first time — previously only discussed, never committed.
+Status: **Phases 0 and 1 done** (`guest-agent/`, `rootfs/`). Phases 2–5 not
+started, and Phase 2 is blocked on hardware — see the prerequisite below.
+This is the roadmap referenced by `SCOPE.md`'s v2 section, written down for
+the first time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
 actually starts.
 
@@ -74,14 +75,24 @@ effect via `stty size`, confirms the exit code round-trips over the control
 channel. `--transport vsock` (the real path) is unverified — that needs
 Phase 2 and a `/dev/kvm`-capable host.
 
-### Phase 1 — Rootfs build
+### Phase 1 — Rootfs build — **done**
 
-A script (not a manual process) that takes an existing room's Docker image,
-flattens it to an ext4 rootfs, and injects the Phase 0 agent as what PID 1
-execs. Open question: minimal custom init that execs the agent directly, vs.
-a tiny existing init (tini) supervising it for reaping zombies. Lean toward
-the custom init first — fewer moving parts — and only add tini if orphaned
-processes inside the guest turn out to matter.
+`rootfs/build.sh`: takes an existing room's Docker image, flattens it to an
+ext4 rootfs, and injects the Phase 0 agent as what PID 1 execs. The room's
+image is resolved through `keycard.config`, so `keycard.toml` stays the
+single definition of what a room is. See `rootfs/README.md`.
+
+The init question above is settled the way it leaned: a shell script
+(`rootfs/init.sh`) that mounts the pseudo-filesystems and execs the agent,
+no tini. The cost is that the agent, as PID 1, reaps only its own child, so
+orphans become zombies for the life of the microVM — bounded by the VM's
+own life, and cheap to revisit if a room ever accumulates enough of them to
+matter.
+
+Verified as far as it can be without `/dev/kvm`: CI builds a real
+`ubuntu:24.04` rootfs on every PR and checks the agent and init are in the
+image and that the agent is statically linked. Whether the image *boots* is
+unverified — that needs Phase 2.
 
 ### Phase 2 — `FirecrackerBackend`
 
@@ -143,8 +154,9 @@ don't claim it earlier.
 
 ## Sequencing
 
-Phase 0 done without the KVM prerequisite, as expected. Phase 1 (rootfs
-build) doesn't strictly need `/dev/kvm` either — it's just a build script —
-but Phase 2 (`FirecrackerBackend`) can't be verified end to end without a
-`/dev/kvm`-capable host. Confirm that environment before investing much in
-Phase 2. No other in-flight work depends on any of this.
+Phases 0 and 1 are done without the KVM prerequisite, as expected — neither
+boots anything. Phase 2 (`FirecrackerBackend`) is where that runs out: it
+can't be verified end to end without a `/dev/kvm`-capable host, and this
+project doesn't have one yet. Confirm that environment before starting
+Phase 2 — it's the actual blocker, not a matter of not having got to it. No
+other in-flight work depends on any of this.

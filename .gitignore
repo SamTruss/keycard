@@ -25,6 +25,9 @@ authorized_keys
 id_*
 !id_*.example
 
+# Built rootfs images (FIRECRACKER.md, Phase 1) — hundreds of MB each
+rootfs/build/
+
 # Editors
 .vscode/
 .idea/
