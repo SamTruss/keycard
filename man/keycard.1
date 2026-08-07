@@ -1,0 +1,153 @@
+.\" Hand-maintained \(em regenerate nothing, just edit this when the CLI in
+.\" src/keycard/cli.py changes. Keep it in sync with `keycard --help`.
+.TH KEYCARD 1 "2026-08-07" "keycard 0.0.1" "keycard manual"
+.SH NAME
+keycard \- disposable SSH sandboxes. One command, zero setup.
+.SH SYNOPSIS
+.B keycard
+.I command
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B keycard
+is a purpose-built SSH server that provisions a disposable container on
+connect and destroys it on disconnect. The username in the SSH request
+selects the environment:
+.PP
+.RS
+ssh ubuntu@host    ->  a clean Linux box
+.br
+ssh python@host    ->  Python, nothing else
+.br
+ssh node@host      ->  Node, nothing else
+.RE
+.PP
+There is no client to install and nothing to configure. A
+.I keycard.toml
+file is read if present, but every default works with zero setup.
+.SH COMMANDS
+.TP
+.B up
+Run the keycard server. Blocks until interrupted (Ctrl-C, SIGINT, or
+SIGTERM), at which point it stops accepting new connections, gives
+connected sessions a grace period to finish, and then exits.
+.TP
+.B rooms
+List the environments the running configuration would offer, along with
+each room's resource caps and network setting, then exit.
+.SH OPTIONS
+.SS "keycard up"
+.TP
+.BI \-\-config " PATH"
+Path to
+.IR keycard.toml .
+Defaults to
+.IR ~/.config/keycard/keycard.toml ,
+falling back to the built-in rooms if that file doesn't exist.
+.TP
+.BI \-\-host " ADDRESS"
+Address to bind. Overrides the
+.I listen
+value from config.
+.TP
+.BI \-\-port " PORT"
+Port to listen on. Overrides the
+.I listen
+value from config.
+.TP
+.BI \-\-keep " DURATION"
+Pause a room on disconnect instead of destroying it, for
+.I DURATION
+(e.g.
+.IR 10m )
+to allow the same username to reconnect and resume it. Overrides the
+.I keep_window
+value from config; unset or
+.I 0
+disables the feature.
+.TP
+.BR \-v ", " \-\-verbose
+Enable debug logging.
+.SS "keycard rooms"
+.TP
+.BI \-\-config " PATH"
+Path to
+.IR keycard.toml ,
+same as above.
+.SS "Global"
+.TP
+.B \-\-version
+Print the keycard version and exit.
+.TP
+.B \-\-help
+Print usage for
+.B keycard
+or any subcommand and exit.
+.SH FILES
+.TP
+.I ~/.config/keycard/keycard.toml
+Optional configuration: listen address, timeouts, and custom
+.RI [ rooms.* ]
+entries. See
+.I keycard.example.toml
+in the project repository for every available key.
+.TP
+.I ~/.config/keycard/authorized_keys
+Public keys permitted to connect, in OpenSSH
+.I authorized_keys
+format. Required \(em keycard refuses to start without it.
+.TP
+.I ~/.config/keycard/host_key
+The server's ed25519 host key, generated on first run and kept
+thereafter. Regenerating it breaks host-key verification for every
+existing client.
+.SH EXIT STATUS
+The
+.B up
+process itself exits 0 on a clean shutdown, or non-zero if it could not
+start (for example, a missing
+.IR authorized_keys ).
+.PP
+Within a single SSH session connected to a room, the exit status seen by
+the client is normally whatever the shell inside the room exited with.
+Two values are reserved for keycard's own housekeeping:
+.TP
+.B 124
+The room was destroyed by the idle-timeout reaper (no traffic for
+.IR idle_timeout ),
+following the same convention as GNU coreutils'
+.BR timeout (1).
+.TP
+.B 143
+The session was cut short because the server was shutting down, after
+its
+.I shutdown_grace
+period expired \(em the same code a shell reports for a process killed
+by SIGTERM (128 + 15).
+.SH EXAMPLES
+.TP
+Start the server with defaults:
+.B keycard up
+.TP
+Bind to a specific host and port, with debug logging:
+.B keycard up \-\-host 0.0.0.0 \-\-port 2222 \-v
+.TP
+Allow a 10-minute reconnect window after a dropped connection:
+.B keycard up \-\-keep 10m
+.TP
+See what a given config would offer:
+.B keycard rooms \-\-config ./keycard.toml
+.TP
+Connect from a client, once the server is running:
+.B ssh \-p 2222 python@yourhost
+.SH SECURITY
+Containers are hygiene, not an isolation boundary \(em see
+.I SECURITY.md
+in the project repository for the full threat model before exposing
+keycard beyond a trusted network.
+.SH AUTHOR
+Sam Truss
+.SH SEE ALSO
+.BR ssh (1),
+.BR docker (1)
+.PP
+Project homepage: https://github.com/SamTruss/keycard

@@ -38,11 +38,40 @@ These are the constraints the project is built around. PRs that cut against them
 
 **Security claims stay honest.** Don't describe v1 as isolation or sandboxing in a security sense. See [SECURITY.md](SECURITY.md).
 
+## Releasing
+
+Versioning follows [Semantic Versioning](https://semver.org/): while keycard
+is pre-1.0, expect breaking changes on a minor bump. Every notable change
+belongs in [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` as it lands,
+not saved up for release day.
+
+To cut a release:
+
+1. In `CHANGELOG.md`, retitle `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
+   and add a fresh empty `## [Unreleased]` above it.
+2. Bump `version` in `pyproject.toml` and `__version__` in
+   `src/keycard/__init__.py` to match.
+3. Commit those two changes, then tag and push:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+4. Pushing the tag runs [release.yml](.github/workflows/release.yml), which
+   verifies the tag matches `pyproject.toml`, builds the sdist and wheel,
+   and creates a GitHub Release using that version's changelog section as
+   the release notes.
+
+Manual step for now: publishing to PyPI isn't automated yet (see
+[SCOPE.md](SCOPE.md)) — build and `twine upload dist/*` by hand until that
+lands.
+
 ## Pull requests
 
 - One logical change per PR
 - Tests for new behaviour
 - Update the README if you change user-facing behaviour
+- Update `man/keycard.1` if you change a CLI flag or command
+- Add an entry under `## [Unreleased]` in CHANGELOG.md for anything notable
 - Conventional-ish commit messages are appreciated but not enforced
 
 ## Reporting bugs

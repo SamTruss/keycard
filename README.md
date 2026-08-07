@@ -256,13 +256,13 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 **v1 — Docker / Podman**
 
-- [ ] SSH server, pubkey auth
-- [ ] Username → image resolution
-- [ ] PTY, resize, exit codes
-- [ ] Teardown on disconnect
-- [ ] Idle reaper
-- [ ] Per-room CPU / memory / pid caps
-- [ ] `--keep` for reconnect windows
+- [x] SSH server, pubkey auth
+- [x] Username → image resolution
+- [x] PTY, resize, exit codes
+- [x] Teardown on disconnect
+- [x] Idle reaper
+- [x] Per-room CPU / memory / pid caps
+- [x] `--keep` for reconnect windows
 - [ ] PyPI + Homebrew
 
 **v2 — Firecracker**
@@ -276,7 +276,7 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 ## Contributing
 
-Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](CONTRIBUTING.md). Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 <div align="center">
 <br>

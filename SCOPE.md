@@ -47,8 +47,8 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 
 - [ ] PyPI release (`pipx install keycard`)
 - [ ] Homebrew formula (`brew install keycard`)
-- [ ] Versioned releases with changelog
-- [ ] Man page or `--help` documentation
+- [x] Versioned releases with changelog
+- [x] Man page or `--help` documentation
 
 ### Site & Docs
 
