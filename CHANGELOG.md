@@ -8,6 +8,16 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-07
+
+### Fixed
+
+- Several README links (license, usage guide, security policy,
+  contributing guide, architecture doc) were relative paths that only
+  resolve on GitHub — on PyPI, where only the README itself is uploaded,
+  they 404'd. Converted to absolute GitHub URLs.
+- Added a `Changelog` link to PyPI's project links sidebar.
+
 ## [0.1.2] - 2026-08-07
 
 ### Fixed

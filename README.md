@@ -10,9 +10,9 @@
 <br>
 
 [![status](https://img.shields.io/badge/status-alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
-[![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](pyproject.toml)
-[![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](USAGE.md#configuring-rooms)
+[![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/LICENSE)
+[![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/pyproject.toml)
+[![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/USAGE.md#configuring-rooms)
 
 <br>
 
@@ -172,7 +172,7 @@ keycard up
 ```
 
 Requires Python 3.11+ and Docker or Podman. Full walkthrough, config
-reference, and troubleshooting: [USAGE.md](USAGE.md).
+reference, and troubleshooting: [USAGE.md](https://github.com/SamTruss/keycard/blob/main/USAGE.md).
 
 <details>
 <summary><b>Installing from source instead</b></summary>
@@ -256,7 +256,7 @@ Containers share a kernel with the host, and escapes are a real, recurring class
 | **Good for** | Software you broadly trust but don't want permanently installed. Throwaway tests. Teaching. Clean-room reproductions. |
 | **Not for** | Anything you actually believe is malicious, or handing shells to people you don't trust on a host you care about. |
 
-Shipping today: public-key auth only, no Docker socket passthrough, no host mounts, dropped capabilities, optional per-room network isolation. Full threat model in [SECURITY.md](SECURITY.md).
+Shipping today: public-key auth only, no Docker socket passthrough, no host mounts, dropped capabilities, optional per-room network isolation. Full threat model in [SECURITY.md](https://github.com/SamTruss/keycard/blob/main/SECURITY.md).
 
 ---
 
@@ -285,13 +285,13 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 ## Contributing
 
-Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](CONTRIBUTING.md) and, before touching the code, [ARCHITECTURE.md](ARCHITECTURE.md). Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](https://github.com/SamTruss/keycard/blob/main/CONTRIBUTING.md) and, before touching the code, [ARCHITECTURE.md](https://github.com/SamTruss/keycard/blob/main/ARCHITECTURE.md). Notable changes are tracked in [CHANGELOG.md](https://github.com/SamTruss/keycard/blob/main/CHANGELOG.md).
 
 <div align="center">
 <br>
 <sub>
 
-MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v0.1.1 &nbsp;·&nbsp; built in the terminal
+MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v0.1.3 &nbsp;·&nbsp; built in the terminal
 
 </sub>
 </div>
