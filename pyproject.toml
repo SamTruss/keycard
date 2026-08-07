@@ -24,9 +24,9 @@ classifiers = [
   "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-  "asyncssh>=2.14",
+  "asyncssh>=2.24.0",
   "docker>=7.2",
-  "click>=8.1",
+  "click>=8.4.2",
 ]
 
 [project.optional-dependencies]
