@@ -49,6 +49,9 @@ Changelog = "https://github.com/SamTruss/keycard/blob/main/CHANGELOG.md"
 [tool.hatch.build.targets.wheel]
 packages = ["src/keycard"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["docs/"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
