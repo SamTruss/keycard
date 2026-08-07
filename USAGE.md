@@ -15,7 +15,11 @@ expose this anywhere, see [SECURITY.md](SECURITY.md).
 
 ## Install
 
-Not on PyPI yet (see [SCOPE.md](SCOPE.md)) — install from source:
+```bash
+pipx install keycard-ssh
+```
+
+Or from source, if you want an unreleased change or want to contribute:
 
 ```bash
 git clone https://github.com/SamTruss/keycard

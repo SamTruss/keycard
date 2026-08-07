@@ -45,7 +45,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 
 ### Packaging
 
-- [ ] PyPI release (`pipx install keycard-ssh`)
+- [x] PyPI release (`pipx install keycard-ssh`)
 - [ ] Homebrew formula (`brew install keycard`)
 - [x] Versioned releases with changelog
 - [x] Man page or `--help` documentation
@@ -67,7 +67,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] Dependabot for actions and pip
 - [x] Security scans (Semgrep, Trivy via reusable workflows)
 - [x] Integration tests in CI
-- [ ] Automated PyPI publish on tag
+- [x] Automated PyPI publish on tag
 
 ## v2 — Firecracker
 

@@ -9,7 +9,7 @@
 
 <br>
 
-[![status](https://img.shields.io/badge/status-pre--alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
+[![status](https://img.shields.io/badge/status-alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
 [![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](pyproject.toml)
 [![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](USAGE.md#configuring-rooms)
@@ -148,8 +148,8 @@ v1 runs on containers, which is enough to keep your machine clean. Real isolatio
 
 ## Status
 
-> [!WARNING]
-> **Pre-alpha.** Not released, not usable yet. This repo is scaffolding and intent.
+> [!NOTE]
+> **Alpha.** Released and installable, but young — expect rough edges and occasional breaking changes before v1.0.
 
 Building in the open. Issues and architectural pushback welcome while everything's still cheap to change.
 
@@ -157,18 +157,13 @@ Building in the open. Issues and architectural pushback welcome while everything
 
 ## Getting started
 
-Once released:
-
 ```bash
-pipx install keycard-ssh    # or: brew install keycard
+pipx install keycard-ssh
 ```
 
-From source, today:
+(Homebrew formula still coming — see the [roadmap](#roadmap).)
 
 ```bash
-git clone https://github.com/SamTruss/keycard && cd keycard
-pip install -e .
-
 # Your key is your keycard
 mkdir -p ~/.config/keycard
 cp ~/.ssh/id_ed25519.pub ~/.config/keycard/authorized_keys
@@ -178,6 +173,18 @@ keycard up
 
 Requires Python 3.11+ and Docker or Podman. Full walkthrough, config
 reference, and troubleshooting: [USAGE.md](USAGE.md).
+
+<details>
+<summary><b>Installing from source instead</b></summary>
+
+<br>
+
+```bash
+git clone https://github.com/SamTruss/keycard && cd keycard
+pip install -e .
+```
+
+</details>
 
 <details>
 <summary><b>Making it one word</b></summary>
@@ -264,7 +271,8 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 - [x] Idle reaper
 - [x] Per-room CPU / memory / pid caps
 - [x] `--keep` for reconnect windows
-- [ ] PyPI + Homebrew
+- [x] PyPI ([`keycard-ssh`](https://pypi.org/project/keycard-ssh/))
+- [ ] Homebrew
 
 **v2 — Firecracker**
 
