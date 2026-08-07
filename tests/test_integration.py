@@ -152,6 +152,21 @@ async def _shell(port: int, key: Path) -> asyncssh.SSHClientConnection:
     )
 
 
+async def _wait_ready(proc: asyncssh.SSHClientProcess[str]) -> None:
+    """Block until the room has actually opened.
+
+    A fixed sleep is a guess about how long a container takes to start —
+    usually fine, but the very first container in a test session (cold
+    Docker daemon, cgroup setup) can occasionally take longer than that
+    guess allows. Input sent before the room opens is silently dropped
+    (the server hasn't set its room yet), so too-short a guess means the
+    test hangs until its own timeout instead of failing fast. Reading the
+    ACCEPTED banner is a fact, not a guess: by the time it arrives, the
+    server has already opened the room and will act on stdin.
+    """
+    await asyncio.wait_for(proc.stdout.readuntil("KEYCARD ACCEPTED"), timeout=15)
+
+
 @pytest.mark.timeout(30)
 async def test_clean_exit_reports_status_and_destroys_room(
     keycard_server: tuple[int, Path],
@@ -161,7 +176,7 @@ async def test_clean_exit_reports_status_and_destroys_room(
 
     async with await _shell(port, key) as conn:
         proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
-        await asyncio.sleep(1)  # let the shell start
+        await _wait_ready(proc)
         proc.stdin.write("exit 3\n")
         result = await asyncio.wait_for(proc.wait(), timeout=10)
 
@@ -180,9 +195,9 @@ async def test_dropped_connection_destroys_room(
 
     conn = await _shell(port, key)
     proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
-    await asyncio.sleep(2)  # let the shell start
+    await _wait_ready(proc)
     proc.stdin.write("sleep 300\n")
-    await asyncio.sleep(2)  # let the room come up and the shell get busy
+    await asyncio.sleep(2)  # let the shell get busy running it
 
     assert _room_ids() != before, "no room was created"
 
@@ -214,9 +229,9 @@ async def test_resize_is_accepted(keycard_server: tuple[int, Path]) -> None:
 
     async with await _shell(port, key) as conn:
         proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
-        await asyncio.sleep(1)
+        await _wait_ready(proc)
         proc.change_terminal_size(120, 40)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # give the resize a moment to land
         proc.stdin.write("exit 0\n")
         result = await asyncio.wait_for(proc.wait(), timeout=10)
 
@@ -230,12 +245,14 @@ async def test_concurrent_sessions_get_isolated_rooms_and_all_clean_up(
     port, key = keycard_server
     before = _room_ids()
     concurrency = 5
+    ready = [asyncio.Event() for _ in range(concurrency)]
     go = asyncio.Event()
 
     async def _session(i: int) -> int:
         async with await _shell(port, key) as conn:
             proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
-            await asyncio.sleep(1)  # let the shell start
+            await _wait_ready(proc)
+            ready[i].set()
             await go.wait()  # hold every session open until they've all peaked together
             proc.stdin.write(f"exit {i}\n")
             result = await asyncio.wait_for(proc.wait(), timeout=15)
@@ -244,8 +261,9 @@ async def test_concurrent_sessions_get_isolated_rooms_and_all_clean_up(
     tasks = [asyncio.create_task(_session(i)) for i in range(concurrency)]
 
     # Prove the server actually runs connections in parallel rather than
-    # one at a time: every session's room should be live at once.
-    await asyncio.sleep(2)
+    # one at a time: wait for every session's room to open, then confirm
+    # they were all live at once.
+    await asyncio.wait_for(asyncio.gather(*(e.wait() for e in ready)), timeout=30)
     peak = _room_ids() - before
     assert len(peak) == concurrency, f"expected {concurrency} concurrent rooms, saw {len(peak)}"
 
@@ -271,7 +289,7 @@ async def test_per_room_caps_and_network_isolation_are_applied(
 
     async with await _shell(port, key) as conn:
         proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
-        await asyncio.sleep(1)  # let the room come up
+        await _wait_ready(proc)
 
         containers = [
             c for c in client.containers.list() if c.attrs.get("Config", {}).get("Image") == IMAGE
