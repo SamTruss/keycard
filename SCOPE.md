@@ -40,7 +40,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] Integration tests: clean exit, dropped connection, unauthorised key, resize
 - [x] Auto-skip integration tests when no container runtime is available
 - [x] Test timeouts to prevent hangs
-- [ ] CI integration tests (GitHub Actions Ubuntu runners have Docker)
+- [x] CI integration tests (GitHub Actions Ubuntu runners have Docker)
 - [ ] Connection stress test (concurrent sessions)
 
 ### Packaging
@@ -66,7 +66,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] SHA-pinned GitHub Actions
 - [x] Dependabot for actions and pip
 - [x] Security scans (Semgrep, Trivy via reusable workflows)
-- [ ] Integration tests in CI
+- [x] Integration tests in CI
 - [ ] Automated PyPI publish on tag
 
 ## v2 — Firecracker

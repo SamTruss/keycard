@@ -39,6 +39,24 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _pull_test_image() -> None:
+    """Pull `IMAGE` once, outside any single test's timing budget.
+
+    On a cold runner (a fresh CI VM, or anyone's first local run) the first
+    `containers.run()` pulls the image inline, which can easily take longer
+    than a test allows for the shell to start — input sent before the room
+    finishes opening is silently dropped, so the shell never sees `exit` and
+    the test hangs until its own timeout. Pulling up front makes every
+    test's timing budget only ever about the container, never the network.
+    """
+    if not _docker_available():
+        return
+    import docker
+
+    docker.from_env().images.pull(IMAGE)
+
+
 def _room_ids() -> set[str]:
     """Containers built from our image, however they were left."""
     import docker
