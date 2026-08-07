@@ -8,6 +8,15 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-07
+
+### Fixed
+
+- README still said "Pre-alpha. Not released, not usable yet" and told
+  installers to run `pipx install keycard-ssh` "once released" — baked into
+  the 0.1.1 tag before that release actually shipped to PyPI, so the
+  published package description contradicted itself. No functional changes.
+
 ## [0.1.1] - 2026-08-07
 
 ### Added
