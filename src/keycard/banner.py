@@ -15,14 +15,14 @@ def _card(*lines: str) -> str:
     top = f"+{'-' * _WIDTH}+"
     bottom = top
     stripe = f"|{'#' * _WIDTH}|"
-    body = "\n".join(f"|{line.ljust(_WIDTH)}|" for line in lines)
+    body = "\n".join(f"|{line.center(_WIDTH)}|" for line in lines)
     return f"{top}\n{stripe}\n{body}\n{bottom}"
 
 
 LOGO = _card(
     "",
-    "  k e y c a r d",
-    "  disposable ssh sandboxes",
+    "k e y c a r d",
+    "disposable ssh sandboxes",
     "",
 )
 
