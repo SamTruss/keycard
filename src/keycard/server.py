@@ -10,7 +10,7 @@ import asyncssh
 
 from .backends.base import Backend
 from .backends.docker import DockerBackend
-from .config import Config
+from .config import Config, RoomConfig
 from .session import RoomSession
 
 log = logging.getLogger(__name__)
@@ -50,11 +50,10 @@ class KeycardServer(asyncssh.SSHServer):
         if room_cfg is None:
             log.warning("no room for username %r", self._username)
             # Fall through — session will fail and report cleanly.
-            image = "ubuntu:24.04"
+            room_cfg = RoomConfig(name="fallback", image="ubuntu:24.04")
         else:
-            image = room_cfg.image
-            log.info("username %r → room %s (%s)", self._username, room_cfg.name, image)
-        return RoomSession(self._backend, image)
+            log.info("username %r → room %s (%s)", self._username, room_cfg.name, room_cfg.image)
+        return RoomSession(self._backend, room_cfg)
 
 
 def check_authorized_keys(path: Path = CONFIG_DIR / "authorized_keys") -> None:

@@ -15,14 +15,15 @@ from typing import Any
 import asyncssh
 
 from .backends.base import Backend, Room
+from .config import RoomConfig
 
 log = logging.getLogger(__name__)
 
 
 class RoomSession(asyncssh.SSHServerSession[bytes]):
-    def __init__(self, backend: Backend, image: str) -> None:
+    def __init__(self, backend: Backend, room: RoomConfig) -> None:
         self._backend = backend
-        self._image = image
+        self._room_cfg = room
         self._chan: asyncssh.SSHServerChannel[bytes] | None = None
         self._room: Room | None = None
         self._pump: asyncio.Task[None] | None = None
@@ -77,7 +78,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         if chan is None:  # pragma: no cover - connection_made always runs first
             return
         try:
-            self._room = await self._backend.open(self._image, *self._size)
+            self._room = await self._backend.open(self._room_cfg, *self._size)
         except Exception:
             log.exception("could not open room")
             chan.write(b"keycard: no room available\r\n")

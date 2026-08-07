@@ -22,8 +22,8 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] Default room fallback for unrecognised usernames
 - [x] CLI: `keycard up` with `--host`, `--port`, `--config`, `--verbose`
 - [x] CLI: `keycard rooms` to list available environments
-- [ ] Per-room resource caps applied to containers (memory, CPU, pids)
-- [ ] Per-room network isolation (`network = "none"`)
+- [x] Per-room resource caps applied to containers (memory, CPU, pids)
+- [x] Per-room network isolation (`network = "none"`)
 
 ### Reliability
 

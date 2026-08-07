@@ -8,6 +8,10 @@ microVM, or something else — that is the whole point of the seam.
 from __future__ import annotations
 
 import abc
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import RoomConfig
 
 
 class Room(abc.ABC):
@@ -39,8 +43,8 @@ class Backend(abc.ABC):
     """Builds rooms."""
 
     @abc.abstractmethod
-    async def open(self, image: str, width: int, height: int) -> Room:
-        """Create a room and attach to it."""
+    async def open(self, room: RoomConfig, width: int, height: int) -> Room:
+        """Create a room and attach to it, applying *room*'s resource caps."""
 
     @abc.abstractmethod
     async def close(self) -> None:

@@ -83,6 +83,47 @@ async def keycard_server(tmp_path: Path) -> AsyncIterator[tuple[int, Path]]:
         await backend.close()
 
 
+@pytest.fixture
+async def capped_keycard_server(tmp_path: Path) -> AsyncIterator[tuple[int, Path]]:
+    """A server with one room carrying explicit resource caps and no network."""
+    client_key = asyncssh.generate_private_key("ssh-ed25519")
+    key_path = tmp_path / "id_ed25519"
+    key_path.write_bytes(client_key.export_private_key())
+
+    authorized = tmp_path / "authorized_keys"
+    authorized.write_bytes(client_key.export_public_key())
+
+    cfg = Config(
+        authorized_keys=authorized,
+        host_key=tmp_path / "host_key",
+        rooms={
+            "capped": RoomConfig(
+                name="capped",
+                image=IMAGE,
+                memory="128m",
+                cpus=1,
+                pids_limit=64,
+                network="none",
+            )
+        },
+        default_room="capped",
+    )
+
+    backend = DockerBackend()
+    server = await create_server(
+        cfg,
+        backend=backend,
+        host_override="127.0.0.1",
+        port_override=0,
+    )
+    port = next(iter(server.sockets)).getsockname()[1]
+    try:
+        yield port, key_path
+    finally:
+        server.close()
+        await backend.close()
+
+
 async def _shell(port: int, key: Path) -> asyncssh.SSHClientConnection:
     return await asyncssh.connect(
         "127.0.0.1",
@@ -162,3 +203,31 @@ async def test_resize_is_accepted(keycard_server: tuple[int, Path]) -> None:
         result = await asyncio.wait_for(proc.wait(), timeout=10)
 
     assert result.exit_status == 0
+
+
+@pytest.mark.timeout(30)
+async def test_per_room_caps_and_network_isolation_are_applied(
+    capped_keycard_server: tuple[int, Path],
+) -> None:
+    import docker
+
+    port, key = capped_keycard_server
+    client = docker.from_env()
+
+    async with await _shell(port, key) as conn:
+        proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
+        await asyncio.sleep(1)  # let the room come up
+
+        containers = [
+            c for c in client.containers.list() if c.attrs.get("Config", {}).get("Image") == IMAGE
+        ]
+        assert len(containers) == 1, "expected exactly one live capped room"
+        host_config = containers[0].attrs["HostConfig"]
+
+        assert host_config["Memory"] == 128 * 1024 * 1024
+        assert host_config["NanoCpus"] == 1_000_000_000
+        assert host_config["PidsLimit"] == 64
+        assert host_config["NetworkMode"] == "none"
+
+        proc.stdin.write("exit 0\n")
+        await asyncio.wait_for(proc.wait(), timeout=10)

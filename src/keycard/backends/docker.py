@@ -20,6 +20,7 @@ from typing import Any
 import docker
 from docker.errors import DockerException, NotFound
 
+from ..config import RoomConfig
 from .base import Backend, Room
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,9 @@ EXIT_GRACE = 1.0
 EXIT_POLL = 0.05
 
 # Hardening applied to every room. None of this makes a container a security
-# boundary — see SECURITY.md — but it removes the obvious footguns.
+# boundary — see SECURITY.md — but it removes the obvious footguns. Per-room
+# config (memory, cpus, pids_limit, network) overrides mem_limit/pids_limit
+# below and adds nano_cpus/network_mode — see _room_overrides().
 ROOM_DEFAULTS: dict[str, Any] = {
     "entrypoint": [],
     "command": ["/bin/bash", "--login"],
@@ -47,6 +50,22 @@ ROOM_DEFAULTS: dict[str, Any] = {
     "mem_limit": "1g",
     "pids_limit": 512,
 }
+
+
+def _room_overrides(room: RoomConfig) -> dict[str, Any]:
+    """Per-room knobs layered on top of ``ROOM_DEFAULTS``.
+
+    Only set keys the room actually configured — an empty ``memory``/``cpus``
+    means "keep the blanket default", not "uncapped".
+    """
+    overrides: dict[str, Any] = {"pids_limit": room.pids_limit}
+    if room.memory:
+        overrides["mem_limit"] = room.memory
+    if room.cpus:
+        overrides["nano_cpus"] = int(room.cpus * 1_000_000_000)
+    if room.network:
+        overrides["network_mode"] = room.network
+    return overrides
 
 
 class DockerRoom(Room):
@@ -130,11 +149,12 @@ class DockerBackend(Backend):
     def __init__(self) -> None:
         self._client = docker.from_env()
 
-    async def open(self, image: str, width: int, height: int) -> Room:
+    async def open(self, room: RoomConfig, width: int, height: int) -> Room:
         loop = asyncio.get_running_loop()
+        run_kwargs = {**ROOM_DEFAULTS, **_room_overrides(room)}
 
         def _open() -> tuple[Any, socket.socket, Any]:
-            container = self._client.containers.run(image, **ROOM_DEFAULTS)
+            container = self._client.containers.run(room.image, **run_kwargs)
             try:
                 container.resize(height=height, width=width)
             except DockerException:
@@ -150,7 +170,7 @@ class DockerBackend(Backend):
             return container, sock, raw
 
         container, sock, raw = await loop.run_in_executor(None, _open)
-        log.info("room opened: %s (%s)", container.short_id, image)
+        log.info("room opened: %s (%s)", container.short_id, room.image)
         return DockerRoom(container, sock, raw)
 
     async def close(self) -> None:
