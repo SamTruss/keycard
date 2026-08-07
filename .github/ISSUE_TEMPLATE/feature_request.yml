@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose an enhancement or new capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        keycard's scope is deliberately narrow — see the Roadmap in [README.md](https://github.com/SamTruss/keycard/blob/main/README.md) and the "Deliberately not building" list. Worth a skim before writing this up, so you know what's likely to land vs. what's a considered no.
+
+        Per [CONTRIBUTING.md](https://github.com/SamTruss/keycard/blob/main/CONTRIBUTING.md), open the issue before sending a PR for anything non-trivial — it'd be a shame to build something that then gets turned down.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that keycard doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you want this to work? Include example commands, config, or CLI output if it helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other ways to solve this, including workarounds you're using today.
+
+  - type: dropdown
+    id: principles
+    attributes:
+      label: Does this keep zero-config working?
+      description: "One of keycard's core design principles: no feature should require editing a file before first connect."
+      options:
+        - "Yes — works with sensible defaults, no config required"
+        - "No — this would require configuration"
+        - Not sure
+    validations:
+      required: true
