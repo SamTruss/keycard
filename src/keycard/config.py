@@ -123,12 +123,13 @@ def _parse_rooms(raw: dict[str, object]) -> dict[str, RoomConfig]:
     return rooms
 
 
+def _builtin_rooms() -> dict[str, RoomConfig]:
+    return {name: RoomConfig(name=name, image=str(v["image"])) for name, v in BUILTIN_ROOMS.items()}
+
+
 def _builtin_config() -> Config:
     """The zero-config default: three rooms, ubuntu as the fallback."""
-    rooms = {
-        name: RoomConfig(name=name, image=str(v["image"])) for name, v in BUILTIN_ROOMS.items()
-    }
-    return Config(rooms=rooms, default_room=DEFAULT_ROOM)
+    return Config(rooms=_builtin_rooms(), default_room=DEFAULT_ROOM)
 
 
 def load(path: Path | None = None) -> Config:
@@ -171,11 +172,7 @@ def load(path: Path | None = None) -> Config:
 
     if not cfg.rooms:
         log.info("config has no [rooms.*] — adding built-in defaults")
-        cfg = _builtin_config()
-        cfg.authorized_keys = Path(
-            str(raw.get("authorized_keys", cfg.authorized_keys))
-        ).expanduser()
-        cfg.host_key = Path(str(raw.get("host_key", cfg.host_key))).expanduser()
+        cfg.rooms = _builtin_rooms()
 
     if cfg.default_room not in cfg.rooms and cfg.rooms:
         cfg.default_room = next(iter(cfg.rooms))

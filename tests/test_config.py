@@ -89,6 +89,34 @@ def test_config_with_no_rooms_falls_back_to_builtins(tmp_path: Path) -> None:
     cfg = load(toml)
     assert "ubuntu" in cfg.rooms
     assert "python" in cfg.rooms
+    # Falling back to builtin rooms must not clobber other overrides — see
+    # test_no_rooms_fallback_preserves_other_overrides for the full set.
+    assert cfg.listen == ":4444"
+
+
+def test_no_rooms_fallback_preserves_other_overrides(tmp_path: Path) -> None:
+    """A keycard.toml with no [rooms.*] still gets its builtin rooms, but
+    every other override must survive — regression test for a bug where
+    falling back replaced the whole Config, silently dropping them all."""
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        'listen = ":4444"\n'
+        'idle_timeout = "5m"\n'
+        'shutdown_grace = "10s"\n'
+        'keep_window = "2m"\n'
+        'default_room = "python"\n',
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+
+    assert cfg.listen == ":4444"
+    assert cfg.idle_timeout_seconds == 300.0
+    assert cfg.shutdown_grace_seconds == 10.0
+    assert cfg.keep_window_seconds == 120.0
+    assert cfg.default_room == "python"  # a real builtin name, so it's kept
+    assert "ubuntu" in cfg.rooms
+    assert "python" in cfg.rooms
+    assert "node" in cfg.rooms
 
 
 def test_host_and_port_parsing() -> None:
