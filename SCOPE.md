@@ -71,12 +71,13 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 
 ## v2 — Firecracker
 
-Phased roadmap in [FIRECRACKER.md](FIRECRACKER.md). Blocked on an environment
-with real `/dev/kvm` access before most of it can start.
+Phased roadmap in [FIRECRACKER.md](FIRECRACKER.md). The phases that don't
+boot anything are done; the rest is blocked on an environment with real
+`/dev/kvm` access.
 
 - [ ] Backend interface abstraction (designed from day one, not yet exercised)
 - [ ] Firecracker microVM provisioning
-- [ ] Rootfs image builds
+- [x] Rootfs image builds (`rootfs/`, with the guest agent in `guest-agent/`)
 - [ ] Tap networking
 - [ ] Real isolation boundary (security claim deferred until this lands)
 

@@ -84,3 +84,65 @@ jobs:
 
       - name: Unit tests
         run: cargo test
+
+  rootfs:
+    # v2 prototype (FIRECRACKER.md, Phase 1) — not wired into the shipped
+    # server. This is the half of the rootfs build a Windows dev box cannot
+    # run: flattening a real room image needs a Docker daemon. It does not
+    # need /dev/kvm, so a stock runner is enough — unlike Phase 2, which
+    # will need a self-hosted one.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+
+      - name: Lint scripts
+        run: shellcheck rootfs/build.sh rootfs/init.sh
+
+      # Built here rather than left to build.sh so that a Rust failure reads
+      # as a Rust failure, and so the build below needs nothing from root's
+      # PATH but python3.
+      - name: Build guest agent
+        working-directory: guest-agent
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      # SUDO_USER is cleared deliberately: the script drops back to the
+      # invoking user to find a per-user keycard install, which is right on
+      # a dev box and wrong here, where `PATH` already points at the Python
+      # that has keycard.
+      - name: Build rootfs
+        run: |
+          sudo env "PATH=$PATH" SUDO_USER= rootfs/build.sh \
+            --room ubuntu \
+            --agent guest-agent/target/x86_64-unknown-linux-musl/release/keycard-guest-agent \
+            --out /tmp/ubuntu.ext4
+
+      # build.sh checks this itself; repeating it here means a broken check
+      # inside the script cannot pass CI on its own say-so.
+      - name: Verify rootfs
+        run: |
+          set -euo pipefail
+          for path in /usr/bin/keycard-guest-agent /usr/sbin/keycard-init /usr/bin/bash; do
+            sudo debugfs -R "stat $path" /tmp/ubuntu.ext4 2>/dev/null | grep -q '^Inode:' \
+              || { echo "missing from rootfs: $path"; exit 1; }
+          done
+          sudo debugfs -R "cat /usr/sbin/keycard-init" /tmp/ubuntu.ext4 2>/dev/null | tail -1
+          # A dynamically linked agent builds fine and then fails to start in
+          # the guest, where there is no matching loader. Catch it here.
+          sudo debugfs -R "dump /usr/bin/keycard-guest-agent /tmp/agent" /tmp/ubuntu.ext4 2>/dev/null
+          file /tmp/agent
+          file /tmp/agent | grep -q 'static' || { echo "agent is not static"; exit 1; }
