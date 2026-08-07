@@ -15,6 +15,7 @@ from typing import Any
 
 import asyncssh
 
+from . import banner
 from .backends.base import Backend, Room
 from .config import RoomConfig
 
@@ -97,6 +98,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
             chan.exit(1)
             return
 
+        chan.write(banner.accepted(self._room_cfg.name, self._room_cfg.image))
         room = self._room
         try:
             while True:
@@ -114,6 +116,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
                 status = await self._checkout(room)
                 self._room = None
                 if not chan.is_closing():
+                    chan.write(banner.destroyed("checked out"))
                     chan.exit(status)
 
     async def _checkout(self, room: Room) -> int:
@@ -147,7 +150,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         log.info("room idle for %.0fs; reaping", self._idle_seconds)
         chan = self._chan
         if chan is not None and not chan.is_closing():
-            chan.write(b"\r\nkeycard: idle timeout -- room reaped\r\n")
+            chan.write(banner.destroyed("idle timeout"))
 
         if self._room is not None:
             room, self._room = self._room, None

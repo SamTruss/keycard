@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from . import __version__
+from . import __version__, banner
 from .config import load as load_config
 
 
@@ -36,6 +36,7 @@ def up(
     verbose: bool,
 ) -> None:
     """Run the keycard server."""
+    click.echo(click.style(banner.LOGO, fg="cyan"))
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s  keycard: %(message)s",
