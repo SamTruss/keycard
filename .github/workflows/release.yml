@@ -83,11 +83,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file release_notes.md \
-            dist/*
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; nothing to do"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release_notes.md \
+              dist/*
+          fi
 
   pypi-publish:
     needs: build
@@ -107,4 +111,9 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+        # Tag-pinned, not SHA-pinned, deliberately: this is a composite
+        # action that derives its Docker image tag from the exact ref it
+        # was invoked with, and PyPA only publishes images to ghcr.io per
+        # release tag, not per commit — SHA-pinning it 404s ("manifest
+        # unknown") since no image exists under that SHA.
+        uses: pypa/gh-action-pypi-publish@v1.14.2
