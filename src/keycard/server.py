@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
+import sys
 from pathlib import Path
 
 import asyncssh
@@ -11,19 +13,29 @@ import asyncssh
 from .backends.base import Backend
 from .backends.docker import DockerBackend
 from .config import Config, RoomConfig
-from .session import RoomSession
+from .session import ActiveSessions, RoomSession
 
 log = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".config" / "keycard"
 
+# Once the grace period is up, force-closed sessions get a moment to actually
+# finish their room teardown before shutdown gives up and moves on.
+FORCE_CLOSE_TIMEOUT = 5.0
+
 
 class KeycardServer(asyncssh.SSHServer):
     """One instance per connection."""
 
-    def __init__(self, backend: Backend, config: Config) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        config: Config,
+        active_sessions: ActiveSessions | None = None,
+    ) -> None:
         self._backend = backend
         self._config = config
+        self._active_sessions = active_sessions
         self._peer = "?"
         self._username = ""
 
@@ -53,7 +65,12 @@ class KeycardServer(asyncssh.SSHServer):
             room_cfg = RoomConfig(name="fallback", image="ubuntu:24.04")
         else:
             log.info("username %r → room %s (%s)", self._username, room_cfg.name, room_cfg.image)
-        return RoomSession(self._backend, room_cfg, self._config.idle_timeout_seconds)
+        return RoomSession(
+            self._backend,
+            room_cfg,
+            self._config.idle_timeout_seconds,
+            self._active_sessions,
+        )
 
 
 def check_authorized_keys(path: Path = CONFIG_DIR / "authorized_keys") -> None:
@@ -93,6 +110,7 @@ async def create_server(
     backend: Backend | None = None,
     host_override: str | None = None,
     port_override: int | None = None,
+    active_sessions: ActiveSessions | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start listening and return the acceptor.
 
@@ -111,7 +129,7 @@ async def create_server(
     port = port_override if port_override is not None else config.port
 
     return await asyncssh.create_server(
-        lambda: KeycardServer(backend, config),
+        lambda: KeycardServer(backend, config, active_sessions),
         host,
         port,
         server_host_keys=[str(config.host_key)],
@@ -121,19 +139,79 @@ async def create_server(
     )
 
 
+async def _drain(active: ActiveSessions, grace: float) -> None:
+    """Give connected clients a chance to finish before their rooms disappear.
+
+    ``grace`` <= 0 means no grace at all — sessions are cut immediately, the
+    same convention ``docker stop``/``systemctl stop`` use for a 0 timeout.
+    """
+    if not len(active):
+        return
+
+    log.info("draining %d active session(s)", len(active))
+    if grace > 0:
+        message = f"\r\nkeycard: server shutting down, {grace:.0f}s to finish up\r\n".encode()
+        for session in list(active):
+            session.notify_shutdown(message)
+        try:
+            async with asyncio.timeout(grace):
+                await active.wait_empty()
+        except TimeoutError:
+            pass
+
+    if not len(active):
+        return
+
+    log.warning("%d session(s) still active after grace period; closing", len(active))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(session.force_close() for session in list(active))),
+            timeout=FORCE_CLOSE_TIMEOUT,
+        )
+    except TimeoutError:
+        log.warning("%d session(s) did not close in time; leaving them", len(active))
+
+
 async def serve(config: Config) -> None:
     backend: Backend = DockerBackend()
-    server = await create_server(config, backend)
+    active = ActiveSessions()
+    server = await create_server(config, backend, active_sessions=active)
 
     rooms = ", ".join(f"{r.name} ({r.image})" for r in config.rooms.values())
     log.info("keycard listening on port %s", config.port)
     log.info("rooms: %s (default: %s)", rooms, config.default_room)
     log.info("try: ssh -p %s ubuntu@localhost", config.port)
 
+    loop = asyncio.get_running_loop()
+    shutdown_requested = asyncio.Event()
+    registered_signals: list[signal.Signals] = []
+    # Windows' proactor loop has no signal support; Ctrl-C there falls back to
+    # the KeyboardInterrupt catch in cli.py, which skips the drain below.
+    # Fine — keycard's server target is Linux/macOS (see SCOPE.md).
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, shutdown_requested.set)
+                registered_signals.append(sig)
+            except NotImplementedError:
+                pass
+
+    closed = asyncio.ensure_future(server.wait_closed())
+    requested = asyncio.ensure_future(shutdown_requested.wait())
     try:
-        await server.wait_closed()
+        await asyncio.wait({closed, requested}, return_when=asyncio.FIRST_COMPLETED)
     except asyncio.CancelledError:
         pass
     finally:
+        closed.cancel()
+        requested.cancel()
+        await asyncio.gather(closed, requested, return_exceptions=True)
+        for sig in registered_signals:
+            loop.remove_signal_handler(sig)
+
+        log.info("shutting down")
         server.close()
+        await server.wait_closed()
+        await _drain(active, config.shutdown_grace_seconds)
         await backend.close()
+        log.info("keycard stopped")

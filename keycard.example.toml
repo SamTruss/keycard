@@ -14,6 +14,11 @@ authorized_keys = "~/.config/keycard/authorized_keys"
 # behind by dropped connections.
 idle_timeout = "15m"
 
+# On shutdown (SIGINT/SIGTERM), how long to let connected sessions finish on
+# their own before they're cut off and their rooms destroyed. "0" cuts
+# everyone off immediately, like `docker stop -t 0`.
+shutdown_grace = "30s"
+
 # Rooms. Each key here becomes a valid SSH username:
 #   ssh -p 2222 python@yourhost
 

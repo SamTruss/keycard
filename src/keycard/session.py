@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import asyncssh
@@ -25,12 +26,56 @@ log = logging.getLogger(__name__)
 # it here means an idle-reaped session is at least recognisable in scripts.
 IDLE_EXIT_STATUS = 124
 
+# What a POSIX shell reports for a process killed by SIGTERM (128 + 15) — a
+# session cut short by a server shutdown is, in effect, exactly that.
+SHUTDOWN_EXIT_STATUS = 143
+
+
+class ActiveSessions:
+    """Live sessions a shutdown drain can wait on without polling a set."""
+
+    def __init__(self) -> None:
+        self._sessions: set[RoomSession] = set()
+        self._empty = asyncio.Event()
+        self._empty.set()
+
+    def add(self, session: RoomSession) -> None:
+        self._sessions.add(session)
+        self._empty.clear()
+
+    def discard(self, session: RoomSession) -> None:
+        self._sessions.discard(session)
+        if not self._sessions:
+            self._empty.set()
+
+    def __len__(self) -> int:
+        return len(self._sessions)
+
+    def __iter__(self) -> Iterator[RoomSession]:
+        return iter(self._sessions)
+
+    def __contains__(self, session: object) -> bool:
+        return session in self._sessions
+
+    async def wait_empty(self) -> None:
+        """Block until every session has released. Callers bound this with
+        ``asyncio.timeout`` — it never returns early on its own."""
+        await self._empty.wait()
+
 
 class RoomSession(asyncssh.SSHServerSession[bytes]):
-    def __init__(self, backend: Backend, room: RoomConfig, idle_seconds: float = 0.0) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        room: RoomConfig,
+        idle_seconds: float = 0.0,
+        active: ActiveSessions | None = None,
+    ) -> None:
         self._backend = backend
         self._room_cfg = room
         self._idle_seconds = idle_seconds
+        # Registry the server drains on shutdown. None in tests that don't care.
+        self._active = active
         self._chan: asyncssh.SSHServerChannel[bytes] | None = None
         self._room: Room | None = None
         self._pump: asyncio.Task[None] | None = None
@@ -42,6 +87,8 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
 
     def connection_made(self, chan: asyncssh.SSHServerChannel[bytes]) -> None:
         self._chan = chan
+        if self._active is not None:
+            self._active.add(self)
 
     def pty_requested(
         self, term_type: str, term_size: tuple[int, int, int, int], term_modes: Any
@@ -81,8 +128,20 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         if self._watchdog is not None:
             self._watchdog.cancel()
         if self._room is not None:
-            asyncio.create_task(self._checkout(self._room))  # noqa: RUF006
-            self._room = None
+            room, self._room = self._room, None
+            asyncio.create_task(self._checkout_then_release(room))  # noqa: RUF006
+        else:
+            self._release()
+
+    async def _checkout_then_release(self, room: Room) -> None:
+        await self._checkout(room)
+        self._release()
+
+    def _release(self) -> None:
+        # A drain loop watches this set shrink to know teardown is done —
+        # release only after the room is actually gone, not merely detached.
+        if self._active is not None:
+            self._active.discard(self)
 
     # -- the pump ----------------------------------------------------------
 
@@ -127,6 +186,35 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         except Exception:
             log.exception("checkout failed")
             return 1
+
+    # -- server shutdown -----------------------------------------------------
+
+    def notify_shutdown(self, message: bytes) -> None:
+        """Warn a connected client before the grace period runs out."""
+        chan = self._chan
+        if chan is not None and not chan.is_closing():
+            chan.write(message)
+
+    async def force_close(self) -> None:
+        """Cut the session short once the shutdown grace period has expired.
+
+        Checks the room out here directly rather than leaving it to
+        `connection_lost` — mirrors `_idle_watchdog` below, so the caller can
+        await teardown finishing rather than just hoping asyncssh gets there.
+        """
+        chan = self._chan
+        if chan is not None and not chan.is_closing():
+            chan.write(banner.destroyed("server shutting down"))
+
+        if self._room is not None:
+            room, self._room = self._room, None
+            await self._checkout(room)
+
+        if chan is not None and not chan.is_closing():
+            chan.exit(SHUTDOWN_EXIT_STATUS)
+            chan.close()
+
+        self._release()
 
     # -- idle reaper ---------------------------------------------------------
 

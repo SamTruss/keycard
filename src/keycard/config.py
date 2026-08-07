@@ -59,6 +59,7 @@ class Config:
     authorized_keys: Path = CONFIG_DIR / "authorized_keys"
     host_key: Path = CONFIG_DIR / "host_key"
     idle_timeout: str = "15m"
+    shutdown_grace: str = "30s"
     default_room: str = DEFAULT_ROOM
     rooms: dict[str, RoomConfig] = field(default_factory=dict)
 
@@ -75,6 +76,14 @@ class Config:
     def idle_timeout_seconds(self) -> float:
         """Zero means the idle reaper is disabled."""
         return parse_duration(self.idle_timeout)
+
+    @property
+    def shutdown_grace_seconds(self) -> float:
+        """How long a graceful shutdown waits for sessions to finish on their
+        own before cutting them off. Zero (or unset) means no grace at all —
+        the same convention ``docker stop``/``systemctl`` use for a 0 timeout.
+        """
+        return parse_duration(self.shutdown_grace)
 
     def resolve(self, username: str) -> RoomConfig | None:
         """Map a username to a room. Returns None if unrecognised."""
@@ -141,6 +150,8 @@ def load(path: Path | None = None) -> Config:
         cfg.host_key = Path(str(raw["host_key"])).expanduser()
     if "idle_timeout" in raw:
         cfg.idle_timeout = str(raw["idle_timeout"])
+    if "shutdown_grace" in raw:
+        cfg.shutdown_grace = str(raw["shutdown_grace"])
     if "default_room" in raw:
         cfg.default_room = str(raw["default_room"])
 

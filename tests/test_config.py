@@ -130,6 +130,25 @@ def test_idle_timeout_seconds_property() -> None:
     assert cfg.idle_timeout_seconds == 0.0
 
 
+def test_shutdown_grace_seconds_property() -> None:
+    cfg = Config(shutdown_grace="30s")
+    assert cfg.shutdown_grace_seconds == 30.0
+
+    cfg = Config(shutdown_grace="0")
+    assert cfg.shutdown_grace_seconds == 0.0
+
+
+def test_shutdown_grace_loaded_from_toml(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        'shutdown_grace = "1m"\n\n[rooms.ubuntu]\nimage = "ubuntu:24.04"\n',
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+    assert cfg.shutdown_grace == "1m"
+    assert cfg.shutdown_grace_seconds == 60.0
+
+
 def test_room_without_image_is_skipped(tmp_path: Path) -> None:
     toml = tmp_path / "keycard.toml"
     toml.write_text(
