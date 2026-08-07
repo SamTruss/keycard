@@ -55,3 +55,32 @@ jobs:
 
       - name: Integration tests
         run: pytest tests/test_integration.py -v
+
+  guest-agent:
+    # v2 prototype (FIRECRACKER.md, Phase 0) — not wired into the shipped
+    # server. Kept in CI anyway so it doesn't silently bitrot on main.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guest-agent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Unit tests
+        run: cargo test
