@@ -160,7 +160,7 @@ Building in the open. Issues and architectural pushback welcome while everything
 Once released:
 
 ```bash
-pipx install keycard    # or: brew install keycard
+pipx install keycard-ssh    # or: brew install keycard
 ```
 
 From source, today:

@@ -58,14 +58,18 @@ To cut a release:
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-4. Pushing the tag runs [release.yml](.github/workflows/release.yml), which
-   verifies the tag matches `pyproject.toml`, builds the sdist and wheel,
-   and creates a GitHub Release using that version's changelog section as
-   the release notes.
-
-Manual step for now: publishing to PyPI isn't automated yet (see
-[SCOPE.md](SCOPE.md)) — build and `twine upload dist/*` by hand until that
-lands.
+4. Pushing the tag runs [release.yml](.github/workflows/release.yml): it
+   verifies the tag matches `pyproject.toml`, builds the sdist and wheel
+   once, then fans out to two jobs that both consume that same build —
+   `github-release` creates a GitHub Release using that version's
+   changelog section as the release notes, and `pypi-publish` publishes to
+   PyPI via [trusted publishing](https://docs.pypi.org/trusted-publishers/)
+   (no stored token).
+5. `pypi-publish` runs under the `pypi` environment, which has a
+   required-reviewer rule — the workflow pauses there until someone with
+   access approves it in the Actions tab. Nothing reaches PyPI until that
+   happens, on purpose: a published version can be yanked but never
+   deleted, so this is the one step worth a manual pause.
 
 ## Pull requests
 

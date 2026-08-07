@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "keycard"
+name = "keycard-ssh"
 version = "0.0.1"
 description = "Disposable SSH sandboxes. One command, zero setup."
 readme = "README.md"
