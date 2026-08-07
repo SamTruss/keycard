@@ -33,3 +33,4 @@ id_*
 
 # Claude Code local state (worktrees, plans, etc.)
 .claude/
+whatsnext.txt
