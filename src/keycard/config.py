@@ -23,6 +23,21 @@ BUILTIN_ROOMS: dict[str, dict[str, object]] = {
 }
 DEFAULT_ROOM = "ubuntu"
 
+_DURATION_UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def parse_duration(spec: str) -> float:
+    """Parse a duration like ``"15m"``, ``"30s"``, ``"1h"``, or a bare number
+    of seconds. ``"0"`` (or an empty string) disables whatever it configures.
+    """
+    spec = spec.strip()
+    if not spec or spec == "0":
+        return 0.0
+    unit = _DURATION_UNITS.get(spec[-1])
+    if unit is not None:
+        return float(spec[:-1]) * unit
+    return float(spec)
+
 
 @dataclass
 class RoomConfig:
@@ -55,6 +70,11 @@ class Config:
     def host(self) -> str:
         h = self.listen.rsplit(":", 1)[0]
         return h if h else ""
+
+    @property
+    def idle_timeout_seconds(self) -> float:
+        """Zero means the idle reaper is disabled."""
+        return parse_duration(self.idle_timeout)
 
     def resolve(self, username: str) -> RoomConfig | None:
         """Map a username to a room. Returns None if unrecognised."""
