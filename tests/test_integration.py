@@ -223,6 +223,43 @@ async def test_resize_is_accepted(keycard_server: tuple[int, Path]) -> None:
     assert result.exit_status == 0
 
 
+@pytest.mark.timeout(60)
+async def test_concurrent_sessions_get_isolated_rooms_and_all_clean_up(
+    keycard_server: tuple[int, Path],
+) -> None:
+    port, key = keycard_server
+    before = _room_ids()
+    concurrency = 5
+    go = asyncio.Event()
+
+    async def _session(i: int) -> int:
+        async with await _shell(port, key) as conn:
+            proc = await conn.create_process(term_type="xterm", term_size=(80, 24))
+            await asyncio.sleep(1)  # let the shell start
+            await go.wait()  # hold every session open until they've all peaked together
+            proc.stdin.write(f"exit {i}\n")
+            result = await asyncio.wait_for(proc.wait(), timeout=15)
+            return result.exit_status
+
+    tasks = [asyncio.create_task(_session(i)) for i in range(concurrency)]
+
+    # Prove the server actually runs connections in parallel rather than
+    # one at a time: every session's room should be live at once.
+    await asyncio.sleep(2)
+    peak = _room_ids() - before
+    assert len(peak) == concurrency, f"expected {concurrency} concurrent rooms, saw {len(peak)}"
+
+    go.set()
+    statuses = await asyncio.wait_for(asyncio.gather(*tasks), timeout=20)
+
+    # Each session's own exit code came back to the right connection —
+    # nothing crossed wires between the concurrent rooms.
+    assert statuses == list(range(concurrency))
+
+    await asyncio.sleep(2)
+    assert _room_ids() == before, "a room leaked after concurrent sessions disconnected"
+
+
 @pytest.mark.timeout(30)
 async def test_per_room_caps_and_network_isolation_are_applied(
     capped_keycard_server: tuple[int, Path],

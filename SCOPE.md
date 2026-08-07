@@ -41,7 +41,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] Auto-skip integration tests when no container runtime is available
 - [x] Test timeouts to prevent hangs
 - [x] CI integration tests (GitHub Actions Ubuntu runners have Docker)
-- [ ] Connection stress test (concurrent sessions)
+- [x] Connection stress test (concurrent sessions)
 
 ### Packaging
 
