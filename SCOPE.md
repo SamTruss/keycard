@@ -57,8 +57,8 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] README with startup-style positioning
 - [x] SECURITY.md with honest threat model
 - [x] CONTRIBUTING.md with design principles
-- [ ] Usage guide with examples
-- [ ] Architecture overview for contributors
+- [x] Usage guide with examples
+- [x] Architecture overview for contributors
 
 ### CI / CD
 

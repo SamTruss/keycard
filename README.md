@@ -12,7 +12,7 @@
 [![status](https://img.shields.io/badge/status-pre--alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
 [![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](pyproject.toml)
-[![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](#configuration)
+[![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](USAGE.md#configuring-rooms)
 
 <br>
 
@@ -173,10 +173,11 @@ pip install -e .
 mkdir -p ~/.config/keycard
 cp ~/.ssh/id_ed25519.pub ~/.config/keycard/authorized_keys
 
-keycard serve
+keycard up
 ```
 
-Requires Python 3.11+ and Docker or Podman.
+Requires Python 3.11+ and Docker or Podman. Full walkthrough, config
+reference, and troubleshooting: [USAGE.md](USAGE.md).
 
 <details>
 <summary><b>Making it one word</b></summary>
@@ -276,7 +277,7 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 ## Contributing
 
-Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](CONTRIBUTING.md). Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](CONTRIBUTING.md) and, before touching the code, [ARCHITECTURE.md](ARCHITECTURE.md). Notable changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 <div align="center">
 <br>

@@ -2,6 +2,8 @@
 
 Thanks for taking a look. keycard is early — architectural discussion is as welcome as code.
 
+Read [ARCHITECTURE.md](ARCHITECTURE.md) first if you're about to touch `src/` — it maps the codebase and, more importantly, explains the five different ways a room gets torn down and why that isn't as fragile as it sounds.
+
 ## Before you start
 
 Open an issue first for anything non-trivial. The scope is deliberately narrow (see the Roadmap in the README), and it'd be a shame for you to build something I then have to turn down. Small fixes and docs improvements can go straight to a PR.
