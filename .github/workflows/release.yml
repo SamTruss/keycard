@@ -116,4 +116,4 @@ jobs:
         # was invoked with, and PyPA only publishes images to ghcr.io per
         # release tag, not per commit — SHA-pinning it 404s ("manifest
         # unknown") since no image exists under that SHA.
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@v1.14.2 # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
