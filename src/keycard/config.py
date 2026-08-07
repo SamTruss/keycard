@@ -60,6 +60,7 @@ class Config:
     host_key: Path = CONFIG_DIR / "host_key"
     idle_timeout: str = "15m"
     shutdown_grace: str = "30s"
+    keep_window: str = "0"
     default_room: str = DEFAULT_ROOM
     rooms: dict[str, RoomConfig] = field(default_factory=dict)
 
@@ -84,6 +85,15 @@ class Config:
         the same convention ``docker stop``/``systemctl`` use for a 0 timeout.
         """
         return parse_duration(self.shutdown_grace)
+
+    @property
+    def keep_window_seconds(self) -> float:
+        """How long a disconnected room stays paused, waiting to be resumed.
+
+        Zero (the default) disables `--keep` entirely: a dropped connection
+        is destroyed immediately, same as v1 before this existed.
+        """
+        return parse_duration(self.keep_window)
 
     def resolve(self, username: str) -> RoomConfig | None:
         """Map a username to a room. Returns None if unrecognised."""
@@ -152,6 +162,8 @@ def load(path: Path | None = None) -> Config:
         cfg.idle_timeout = str(raw["idle_timeout"])
     if "shutdown_grace" in raw:
         cfg.shutdown_grace = str(raw["shutdown_grace"])
+    if "keep_window" in raw:
+        cfg.keep_window = str(raw["keep_window"])
     if "default_room" in raw:
         cfg.default_room = str(raw["default_room"])
 

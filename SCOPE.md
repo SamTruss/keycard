@@ -31,7 +31,7 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 - [x] Grace period with kill fallback on hard disconnect
 - [x] Idempotent destroy (safe to call more than once)
 - [x] Idle timeout reaper for orphaned sessions
-- [ ] `--keep` flag: pause room on disconnect, allow reconnect within a window
+- [x] `--keep` flag: pause room on disconnect, allow reconnect within a window
 - [x] Graceful server shutdown (drain active sessions before exit)
 
 ### Testing

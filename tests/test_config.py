@@ -138,6 +138,25 @@ def test_shutdown_grace_seconds_property() -> None:
     assert cfg.shutdown_grace_seconds == 0.0
 
 
+def test_keep_window_seconds_property() -> None:
+    cfg = Config(keep_window="10m")
+    assert cfg.keep_window_seconds == 600.0
+
+    cfg = Config()
+    assert cfg.keep_window_seconds == 0.0  # off by default
+
+
+def test_keep_window_loaded_from_toml(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        'keep_window = "10m"\n\n[rooms.ubuntu]\nimage = "ubuntu:24.04"\n',
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+    assert cfg.keep_window == "10m"
+    assert cfg.keep_window_seconds == 600.0
+
+
 def test_shutdown_grace_loaded_from_toml(tmp_path: Path) -> None:
     toml = tmp_path / "keycard.toml"
     toml.write_text(

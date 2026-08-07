@@ -14,6 +14,15 @@ if TYPE_CHECKING:
     from ..config import RoomConfig
 
 
+class Kept:
+    """Opaque handle to a room paused by `Room.pause()`.
+
+    Carries whatever a backend needs to find the room again — a container
+    ID, a microVM snapshot path, whatever. Nothing above the backend layer
+    looks inside it.
+    """
+
+
 class Room(abc.ABC):
     """A single live sandbox with an attached pty."""
 
@@ -38,6 +47,16 @@ class Room(abc.ABC):
         and those can race.
         """
 
+    @abc.abstractmethod
+    async def pause(self) -> Kept:
+        """Freeze the room instead of destroying it.
+
+        Releases this Room's own per-connection resources (sockets, handles)
+        but leaves the sandbox itself intact, so a later `Backend.resume` can
+        pick it back up. Used for `--keep`: a dropped connection gets a
+        window to reconnect instead of losing its room outright.
+        """
+
 
 class Backend(abc.ABC):
     """Builds rooms."""
@@ -45,6 +64,14 @@ class Backend(abc.ABC):
     @abc.abstractmethod
     async def open(self, room: RoomConfig, width: int, height: int) -> Room:
         """Create a room and attach to it, applying *room*'s resource caps."""
+
+    @abc.abstractmethod
+    async def resume(self, kept: Kept, width: int, height: int) -> Room:
+        """Unfreeze a room `pause`d earlier and reattach to it."""
+
+    @abc.abstractmethod
+    async def destroy_kept(self, kept: Kept) -> None:
+        """Tear down a paused room once its keep window has expired."""
 
     @abc.abstractmethod
     async def close(self) -> None:

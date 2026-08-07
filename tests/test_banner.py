@@ -28,6 +28,14 @@ def test_accepted_names_the_room() -> None:
     assert out.endswith("\r\n")
 
 
+def test_resumed_names_the_room() -> None:
+    out = banner.resumed("python", "python:3.12-slim").decode()
+    assert "KEYCARD RESUMED" in out
+    assert "python" in out
+    assert "python:3.12-slim" in out
+    assert out.endswith("\r\n")
+
+
 def test_destroyed_carries_the_reason() -> None:
     out = banner.destroyed("idle timeout").decode()
     assert "ROOM DESTROYED" in out

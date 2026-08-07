@@ -37,6 +37,16 @@ def accepted(room_name: str, image: str) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode()
 
 
+def resumed(room_name: str, image: str) -> bytes:
+    lines = [
+        "",
+        f"{_BOLD_CYAN}KEYCARD RESUMED{_RESET}",
+        f"welcome back to {room_name} {_DIM}({image}){_RESET}",
+        "",
+    ]
+    return ("\r\n".join(lines) + "\r\n").encode()
+
+
 def destroyed(reason: str) -> bytes:
     lines = [
         "",

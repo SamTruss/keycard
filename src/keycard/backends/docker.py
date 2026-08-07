@@ -15,13 +15,13 @@ import asyncio
 import logging
 import socket
 import time
-from typing import Any
+from typing import Any, cast
 
 import docker
 from docker.errors import DockerException, NotFound
 
 from ..config import RoomConfig
-from .base import Backend, Room
+from .base import Backend, Kept, Room
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,11 @@ def _room_overrides(room: RoomConfig) -> dict[str, Any]:
     return overrides
 
 
+class DockerKept(Kept):
+    def __init__(self, container_id: str) -> None:
+        self.container_id = container_id
+
+
 class DockerRoom(Room):
     def __init__(self, container: Any, sock: socket.socket, raw: Any) -> None:
         self._container = container
@@ -88,6 +93,16 @@ class DockerRoom(Room):
             await self._loop.sock_sendall(self._sock, data)
         except OSError:
             log.debug("write to room failed; it has probably gone")
+
+    def _close_attachment(self) -> None:
+        try:
+            self._sock.close()
+        except OSError:
+            log.debug("socket already closed")
+        try:
+            self._raw.close()
+        except Exception:  # noqa: BLE001
+            log.debug("attach handle already closed")
 
     async def resize(self, width: int, height: int) -> None:
         def _resize() -> None:
@@ -133,16 +148,37 @@ class DockerRoom(Room):
                 log.debug("container already removed")
             return status
 
-        try:
-            self._sock.close()
-        except OSError:
-            log.debug("socket already closed")
-        try:
-            self._raw.close()
-        except Exception:  # noqa: BLE001
-            log.debug("attach handle already closed")
-
+        self._close_attachment()
         return await self._loop.run_in_executor(None, _destroy)
+
+    async def pause(self) -> DockerKept:
+        # Same connection-level cleanup as destroy(), minus the container
+        # teardown — pausing freezes it in place via the cgroup freezer, so
+        # whatever the shell was doing (including background jobs) is exactly
+        # where it left off on resume.
+        self._close_attachment()
+
+        def _pause() -> None:
+            try:
+                self._container.pause()
+            except (DockerException, NotFound):
+                log.debug("pause failed; room may have already ended")
+
+        await self._loop.run_in_executor(None, _pause)
+        return DockerKept(self._container.id)
+
+
+def _attach(container: Any, width: int, height: int) -> tuple[socket.socket, Any]:
+    """Resize and attach to *container*, returning the bare socket the event
+    loop can poll and the docker-py wrapper it came from."""
+    try:
+        container.resize(height=height, width=width)
+    except DockerException:
+        log.debug("resize failed")
+    raw = container.attach_socket(params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1})
+    sock = getattr(raw, "_sock", raw)
+    sock.setblocking(False)
+    return sock, raw
 
 
 class DockerBackend(Backend):
@@ -155,23 +191,41 @@ class DockerBackend(Backend):
 
         def _open() -> tuple[Any, socket.socket, Any]:
             container = self._client.containers.run(room.image, **run_kwargs)
-            try:
-                container.resize(height=height, width=width)
-            except DockerException:
-                log.debug("initial resize failed")
-
-            raw = container.attach_socket(
-                params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1}
-            )
-            # docker-py hands back a wrapper; the bare socket is what the event
-            # loop can actually poll.
-            sock = getattr(raw, "_sock", raw)
-            sock.setblocking(False)
+            sock, raw = _attach(container, width, height)
             return container, sock, raw
 
         container, sock, raw = await loop.run_in_executor(None, _open)
         log.info("room opened: %s (%s)", container.short_id, room.image)
         return DockerRoom(container, sock, raw)
+
+    async def resume(self, kept: Kept, width: int, height: int) -> Room:
+        # Only ever produced by DockerRoom.pause() above.
+        kept = cast(DockerKept, kept)
+        loop = asyncio.get_running_loop()
+
+        def _resume() -> tuple[Any, socket.socket, Any]:
+            container = self._client.containers.get(kept.container_id)
+            container.unpause()
+            sock, raw = _attach(container, width, height)
+            return container, sock, raw
+
+        container, sock, raw = await loop.run_in_executor(None, _resume)
+        log.info("room resumed: %s", container.short_id)
+        return DockerRoom(container, sock, raw)
+
+    async def destroy_kept(self, kept: Kept) -> None:
+        kept = cast(DockerKept, kept)
+        loop = asyncio.get_running_loop()
+
+        def _destroy() -> None:
+            try:
+                container = self._client.containers.get(kept.container_id)
+                container.remove(force=True)
+            except (DockerException, NotFound):
+                log.debug("kept container already gone")
+
+        await loop.run_in_executor(None, _destroy)
+        log.info("kept room destroyed: %s", kept.container_id[:12])
 
     async def close(self) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self._client.close)

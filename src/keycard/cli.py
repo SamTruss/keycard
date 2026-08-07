@@ -28,11 +28,20 @@ def main() -> None:
 )
 @click.option("--host", default=None, help="Address to bind. Overrides config.")
 @click.option("--port", default=None, type=int, help="Port to listen on. Overrides config.")
+@click.option(
+    "--keep",
+    "keep_window",
+    default=None,
+    metavar="DURATION",
+    help="Pause a room on disconnect instead of destroying it, for DURATION "
+    "(e.g. '10m') to allow reconnect. Overrides config.",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Debug logging.")
 def up(
     config_path: Path | None,
     host: str | None,
     port: int | None,
+    keep_window: str | None,
     verbose: bool,
 ) -> None:
     """Run the keycard server."""
@@ -47,6 +56,8 @@ def up(
         cfg.listen = f"{host}:{cfg.port}"
     if port is not None:
         cfg.listen = f"{cfg.host}:{port}"
+    if keep_window is not None:
+        cfg.keep_window = keep_window
 
     from .server import serve
 

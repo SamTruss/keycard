@@ -19,6 +19,13 @@ idle_timeout = "15m"
 # everyone off immediately, like `docker stop -t 0`.
 shutdown_grace = "30s"
 
+# If a connection drops mid-session (not a typed `exit`), pause the room
+# instead of destroying it, and give the same username this long to
+# reconnect and pick up right where they left off. "0" (the default) turns
+# this off — a dropped connection is destroyed immediately, as in v1.
+# Also settable per-run with `keycard up --keep 10m`.
+keep_window = "0"
+
 # Rooms. Each key here becomes a valid SSH username:
 #   ssh -p 2222 python@yourhost
 

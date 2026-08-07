@@ -17,7 +17,7 @@ from typing import Any
 import asyncssh
 
 from . import banner
-from .backends.base import Backend, Room
+from .backends.base import Backend, Kept, Room
 from .config import RoomConfig
 
 log = logging.getLogger(__name__)
@@ -63,6 +63,52 @@ class ActiveSessions:
         await self._empty.wait()
 
 
+class KeptRooms:
+    """Rooms paused on disconnect, held for reconnect within a keep window.
+
+    Keyed by username: reconnecting under that username reclaims the paused
+    room. This doesn't add a new trust boundary — every authorised key is
+    already treated as equally trusted (see SECURITY.md), so any keyholder
+    who could `ssh python@host` before could already reach this room anyway.
+    """
+
+    def __init__(self, backend: Backend, window_seconds: float) -> None:
+        self._backend = backend
+        self.window_seconds = window_seconds
+        self._by_username: dict[str, Kept] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return self.window_seconds > 0
+
+    def take(self, username: str) -> Kept | None:
+        """Claim a paused room for reconnect, cancelling its expiry."""
+        return self._by_username.pop(username, None)
+
+    async def keep(self, username: str, room: Room) -> None:
+        """Pause *room* and hold it for `window_seconds`, destroying it if
+        nothing calls `take()` first."""
+        kept = await room.pause()
+        self._by_username[username] = kept
+        asyncio.create_task(self._expire(username, kept))  # noqa: RUF006
+
+    async def _expire(self, username: str, kept: Kept) -> None:
+        await asyncio.sleep(self.window_seconds)
+        if self._by_username.get(username) is kept:
+            del self._by_username[username]
+            await self._backend.destroy_kept(kept)
+            log.info("kept room for %r expired; destroyed", username)
+
+    async def destroy_all(self) -> None:
+        """Sweep every paused room. Called on server shutdown — once the
+        process exits, nothing is left to run the expiry timers above, so
+        anything still kept would otherwise leak indefinitely."""
+        for username, kept in list(self._by_username.items()):
+            if self._by_username.get(username) is kept:
+                del self._by_username[username]
+                await self._backend.destroy_kept(kept)
+
+
 class RoomSession(asyncssh.SSHServerSession[bytes]):
     def __init__(
         self,
@@ -70,12 +116,17 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         room: RoomConfig,
         idle_seconds: float = 0.0,
         active: ActiveSessions | None = None,
+        username: str = "",
+        kept: KeptRooms | None = None,
     ) -> None:
         self._backend = backend
         self._room_cfg = room
         self._idle_seconds = idle_seconds
         # Registry the server drains on shutdown. None in tests that don't care.
         self._active = active
+        self._username = username
+        # Registry for --keep reconnects. None means the feature is off.
+        self._kept = kept
         self._chan: asyncssh.SSHServerChannel[bytes] | None = None
         self._room: Room | None = None
         self._pump: asyncio.Task[None] | None = None
@@ -121,19 +172,32 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         return False
 
     def connection_lost(self, exc: Exception | None) -> None:
-        # Checkout. This fires whether the user typed exit or the network died,
-        # which is exactly the guarantee keycard is selling.
+        # This fires whether the user typed exit or the network died, which
+        # is exactly the guarantee keycard is selling — the room was still
+        # live, so either destroy it or (with --keep) pause it for reconnect.
         if self._pump is not None:
             self._pump.cancel()
         if self._watchdog is not None:
             self._watchdog.cancel()
         if self._room is not None:
             room, self._room = self._room, None
-            asyncio.create_task(self._checkout_then_release(room))  # noqa: RUF006
+            asyncio.create_task(self._release_room(room))  # noqa: RUF006
         else:
             self._release()
 
-    async def _checkout_then_release(self, room: Room) -> None:
+    async def _release_room(self, room: Room) -> None:
+        if self._kept is not None and self._kept.enabled:
+            try:
+                await self._kept.keep(self._username, room)
+                log.info(
+                    "room paused for %r (%.0fs to reconnect)",
+                    self._username,
+                    self._kept.window_seconds,
+                )
+                self._release()
+                return
+            except Exception:
+                log.exception("pause failed; destroying room instead")
         await self._checkout(room)
         self._release()
 
@@ -149,15 +213,29 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         chan = self._chan
         if chan is None:  # pragma: no cover - connection_made always runs first
             return
+        kept = self._kept.take(self._username) if self._kept is not None else None
         try:
-            self._room = await self._backend.open(self._room_cfg, *self._size)
+            if kept is not None:
+                self._room = await self._backend.resume(kept, *self._size)
+            else:
+                self._room = await self._backend.open(self._room_cfg, *self._size)
         except Exception:
             log.exception("could not open room")
+            if kept is not None:
+                # take() already claimed it — nothing else will ever clean
+                # this container up if we don't.
+                try:
+                    await self._backend.destroy_kept(kept)
+                except Exception:
+                    log.exception("cleanup of failed resume also failed")
             chan.write(b"keycard: no room available\r\n")
             chan.exit(1)
             return
 
-        chan.write(banner.accepted(self._room_cfg.name, self._room_cfg.image))
+        if kept is not None:
+            chan.write(banner.resumed(self._room_cfg.name, self._room_cfg.image))
+        else:
+            chan.write(banner.accepted(self._room_cfg.name, self._room_cfg.image))
         room = self._room
         try:
             while True:

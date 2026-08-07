@@ -6,14 +6,27 @@ import asyncio
 
 import pytest
 
-from keycard.backends.base import Backend, Room
+from keycard.backends.base import Backend, Kept, Room
 from keycard.config import RoomConfig
-from keycard.session import IDLE_EXIT_STATUS, SHUTDOWN_EXIT_STATUS, ActiveSessions, RoomSession
+from keycard.session import (
+    IDLE_EXIT_STATUS,
+    SHUTDOWN_EXIT_STATUS,
+    ActiveSessions,
+    KeptRooms,
+    RoomSession,
+)
+
+
+class FakeKept(Kept):
+    def __init__(self, room: FakeRoom) -> None:
+        self.room = room
 
 
 class FakeRoom(Room):
     def __init__(self) -> None:
         self.destroy_count = 0
+        self.pause_count = 0
+        self.destroy_kept_count = 0
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
         self.writes: list[bytes] = []
 
@@ -34,6 +47,10 @@ class FakeRoom(Room):
         await self._queue.put(b"")  # unblock a pending read()
         return 0
 
+    async def pause(self) -> FakeKept:
+        self.pause_count += 1
+        return FakeKept(self)
+
 
 class FakeBackend(Backend):
     def __init__(self, room: FakeRoom) -> None:
@@ -41,6 +58,14 @@ class FakeBackend(Backend):
 
     async def open(self, room: RoomConfig, width: int, height: int) -> Room:
         return self._room
+
+    async def resume(self, kept: Kept, width: int, height: int) -> Room:
+        assert isinstance(kept, FakeKept)
+        return kept.room
+
+    async def destroy_kept(self, kept: Kept) -> None:
+        assert isinstance(kept, FakeKept)
+        kept.room.destroy_kept_count += 1
 
     async def close(self) -> None:
         pass
@@ -294,3 +319,167 @@ async def test_drain_with_no_grace_force_closes_immediately() -> None:
     assert not active
 
     await _teardown(session)
+
+
+# -- --keep ------------------------------------------------------------------
+
+
+class FailingResumeBackend(FakeBackend):
+    async def resume(self, kept: Kept, width: int, height: int) -> Room:
+        raise RuntimeError("boom")
+
+
+@pytest.mark.timeout(5)
+async def test_keep_and_take_roundtrip() -> None:
+    room = FakeRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=10.0)
+
+    await kept.keep("alice", room)
+    assert room.pause_count == 1
+
+    claimed = kept.take("alice")
+    assert claimed is not None
+    assert kept.take("alice") is None  # already claimed, nothing left
+
+
+@pytest.mark.timeout(5)
+async def test_kept_room_expires_and_is_destroyed_if_never_reclaimed() -> None:
+    room = FakeRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=0.05)
+
+    await kept.keep("alice", room)
+    assert kept.take("bob") is None  # different username claims nothing
+
+    await asyncio.sleep(0.15)
+
+    assert room.destroy_kept_count == 1
+    assert kept.take("alice") is None  # expired, nothing left to reclaim
+
+
+@pytest.mark.timeout(5)
+async def test_take_cancels_the_expiry_timer() -> None:
+    room = FakeRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=0.05)
+
+    await kept.keep("alice", room)
+    assert kept.take("alice") is not None
+
+    await asyncio.sleep(0.15)  # past the original window
+
+    assert room.destroy_kept_count == 0  # already claimed; timer was a no-op
+
+
+@pytest.mark.timeout(5)
+async def test_destroy_all_sweeps_every_kept_room() -> None:
+    room_a, room_b = FakeRoom(), FakeRoom()
+    backend = FakeBackend(room_a)
+    kept = KeptRooms(backend, window_seconds=10.0)
+
+    await kept.keep("alice", room_a)
+    await kept.keep("bob", room_b)
+
+    await kept.destroy_all()
+
+    assert room_a.destroy_kept_count == 1
+    assert room_b.destroy_kept_count == 1
+    assert kept.take("alice") is None
+    assert kept.take("bob") is None
+
+
+@pytest.mark.timeout(5)
+async def test_dropped_connection_destroys_when_keep_disabled() -> None:
+    """No `kept` registry at all — the default, unchanged behaviour."""
+    room = FakeRoom()
+    session = RoomSession(FakeBackend(room), RoomConfig(name="ubuntu", image="ubuntu:24.04"))
+    chan = FakeChannel()
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.05)
+
+    session.connection_lost(None)
+    await asyncio.sleep(0.05)
+
+    assert room.destroy_count == 1
+    assert room.pause_count == 0
+
+
+@pytest.mark.timeout(5)
+async def test_dropped_connection_destroys_when_window_is_zero() -> None:
+    """A `kept` registry is wired up, but keep_window="0" — still off."""
+    room = FakeRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=0.0)
+    assert not kept.enabled
+
+    session = RoomSession(
+        backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"), username="alice", kept=kept
+    )
+    chan = FakeChannel()
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.05)
+
+    session.connection_lost(None)
+    await asyncio.sleep(0.05)
+
+    assert room.destroy_count == 1
+    assert room.pause_count == 0
+
+
+@pytest.mark.timeout(5)
+async def test_dropped_connection_pauses_and_reconnect_resumes() -> None:
+    room = FakeRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=10.0)
+
+    chan_a = FakeChannel()
+    session_a = RoomSession(
+        backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"), username="alice", kept=kept
+    )
+    session_a.connection_made(chan_a)  # type: ignore[arg-type]
+    session_a.session_started()
+    await asyncio.sleep(0.05)  # let the room open
+
+    session_a.connection_lost(None)  # dropped mid-session, not a clean exit
+    await asyncio.sleep(0.05)  # let the pause complete
+
+    assert room.pause_count == 1
+    assert room.destroy_count == 0
+
+    chan_b = FakeChannel()
+    session_b = RoomSession(
+        backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"), username="alice", kept=kept
+    )
+    session_b.connection_made(chan_b)  # type: ignore[arg-type]
+    session_b.session_started()
+    await asyncio.sleep(0.05)
+
+    assert b"KEYCARD RESUMED" in b"".join(chan_b.written)
+    assert kept.take("alice") is None  # already claimed by session_b
+
+    await _teardown(session_a)
+    await _teardown(session_b)
+
+
+@pytest.mark.timeout(5)
+async def test_resume_failure_destroys_the_claimed_room() -> None:
+    """A resume that blows up must not leak the container it already claimed."""
+    room = FakeRoom()
+    backend = FailingResumeBackend(room)
+    kept = KeptRooms(backend, window_seconds=10.0)
+    await kept.keep("alice", room)
+
+    chan = FakeChannel()
+    session = RoomSession(
+        backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"), username="alice", kept=kept
+    )
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.05)
+
+    assert chan.exit_status == 1
+    assert room.destroy_kept_count == 1
+    assert kept.take("alice") is None

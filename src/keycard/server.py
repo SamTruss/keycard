@@ -13,7 +13,7 @@ import asyncssh
 from .backends.base import Backend
 from .backends.docker import DockerBackend
 from .config import Config, RoomConfig
-from .session import ActiveSessions, RoomSession
+from .session import ActiveSessions, KeptRooms, RoomSession
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +32,12 @@ class KeycardServer(asyncssh.SSHServer):
         backend: Backend,
         config: Config,
         active_sessions: ActiveSessions | None = None,
+        kept_rooms: KeptRooms | None = None,
     ) -> None:
         self._backend = backend
         self._config = config
         self._active_sessions = active_sessions
+        self._kept_rooms = kept_rooms
         self._peer = "?"
         self._username = ""
 
@@ -70,6 +72,8 @@ class KeycardServer(asyncssh.SSHServer):
             room_cfg,
             self._config.idle_timeout_seconds,
             self._active_sessions,
+            self._username,
+            self._kept_rooms,
         )
 
 
@@ -111,6 +115,7 @@ async def create_server(
     host_override: str | None = None,
     port_override: int | None = None,
     active_sessions: ActiveSessions | None = None,
+    kept_rooms: KeptRooms | None = None,
 ) -> asyncssh.SSHAcceptor:
     """Start listening and return the acceptor.
 
@@ -119,9 +124,11 @@ async def create_server(
     """
     check_authorized_keys(config.authorized_keys)
     ensure_host_key(config.host_key)
-    # Accessed here, not just at connection time, so a malformed idle_timeout
-    # fails fast instead of surfacing on the first SSH connection.
+    # Accessed here, not just when used, so a malformed duration string fails
+    # fast at startup instead of surfacing later on a connection or at exit.
     log.debug("idle timeout: %.0fs (0 disables the reaper)", config.idle_timeout_seconds)
+    log.debug("shutdown grace: %.0fs", config.shutdown_grace_seconds)
+    log.debug("keep window: %.0fs (0 disables --keep)", config.keep_window_seconds)
     if backend is None:
         backend = DockerBackend()
 
@@ -129,7 +136,7 @@ async def create_server(
     port = port_override if port_override is not None else config.port
 
     return await asyncssh.create_server(
-        lambda: KeycardServer(backend, config, active_sessions),
+        lambda: KeycardServer(backend, config, active_sessions, kept_rooms),
         host,
         port,
         server_host_keys=[str(config.host_key)],
@@ -175,12 +182,15 @@ async def _drain(active: ActiveSessions, grace: float) -> None:
 async def serve(config: Config) -> None:
     backend: Backend = DockerBackend()
     active = ActiveSessions()
-    server = await create_server(config, backend, active_sessions=active)
+    kept = KeptRooms(backend, config.keep_window_seconds)
+    server = await create_server(config, backend, active_sessions=active, kept_rooms=kept)
 
     rooms = ", ".join(f"{r.name} ({r.image})" for r in config.rooms.values())
     log.info("keycard listening on port %s", config.port)
     log.info("rooms: %s (default: %s)", rooms, config.default_room)
     log.info("try: ssh -p %s ubuntu@localhost", config.port)
+    if kept.enabled:
+        log.info("--keep enabled: %.0fs to reconnect after a dropped session", kept.window_seconds)
 
     loop = asyncio.get_running_loop()
     shutdown_requested = asyncio.Event()
@@ -213,5 +223,7 @@ async def serve(config: Config) -> None:
         server.close()
         await server.wait_closed()
         await _drain(active, config.shutdown_grace_seconds)
+        # Nothing will ever run their expiry timers once this process exits.
+        await kept.destroy_all()
         await backend.close()
         log.info("keycard stopped")
