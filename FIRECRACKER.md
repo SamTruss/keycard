@@ -1,9 +1,10 @@
 # Firecracker Backend — Phased Plan
 
-Status: **not started**. This is the roadmap referenced by `SCOPE.md`'s v2
-section, written down for the first time — previously only discussed, never
-committed. Nothing below is final; treat it as the current best guess,
-revised as work actually starts.
+Status: **Phase 0 done** (`guest-agent/`, merged in #31). Phases 1–5 not
+started. This is the roadmap referenced by `SCOPE.md`'s v2 section, written
+down for the first time — previously only discussed, never committed.
+Nothing below is final; treat it as the current best guess, revised as work
+actually starts.
 
 ## Why this exists
 
@@ -57,16 +58,21 @@ environment before investing in Phase 1+.
 
 ## Phases
 
-### Phase 0 — Guest agent, no Firecracker yet
+### Phase 0 — Guest agent, no Firecracker yet — **done**
 
-A small static binary (Rust or Go — needs to run as PID 1 or PID 1's
-direct child with no runtime dependencies in the rootfs). Listens on a
-vsock port; on connect, execs the shell with a pty, bridges stdin/stdout,
-handles resize control messages, exits with the shell's real exit status.
+`guest-agent/`: a small Rust binary (static-ish release build, no async
+runtime overhead beyond tokio itself — see that directory's README for why
+Rust over Go). Meant to run as PID 1's direct child with no other runtime
+dependencies in the rootfs. Listens on a data port (raw pty bytes) and a
+control port (newline-delimited `resize`/`exit` messages), execs the shell
+on connect, bridges the two, reports exit status.
 
-Testable on the host without a microVM at all: stand in a Unix socket or
-loopback TCP for vsock during early development. This phase doesn't need
-the KVM prerequisite and can start immediately.
+Verified with `--transport tcp` as a loopback stand-in for vsock — no
+microVM needed for this phase (see `guest-agent/test_client.py`): spawns a
+real shell, sends input, resizes mid-session and confirms `TIOCSWINSZ` took
+effect via `stty size`, confirms the exit code round-trips over the control
+channel. `--transport vsock` (the real path) is unverified — that needs
+Phase 2 and a `/dev/kvm`-capable host.
 
 ### Phase 1 — Rootfs build
 
@@ -137,6 +143,8 @@ don't claim it earlier.
 
 ## Sequencing
 
-Not started. Phase 0 (guest agent) can begin without the KVM prerequisite;
-everything from Phase 1 on needs it. No other in-flight work depends on
-this — it's independent of the current `issue-templates` branch.
+Phase 0 done without the KVM prerequisite, as expected. Phase 1 (rootfs
+build) doesn't strictly need `/dev/kvm` either — it's just a build script —
+but Phase 2 (`FirecrackerBackend`) can't be verified end to end without a
+`/dev/kvm`-capable host. Confirm that environment before investing much in
+Phase 2. No other in-flight work depends on any of this.
