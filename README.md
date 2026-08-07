@@ -283,7 +283,7 @@ Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](C
 <br>
 <sub>
 
-MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v0.0.1 &nbsp;·&nbsp; built in the terminal
+MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v0.1.0 &nbsp;·&nbsp; built in the terminal
 
 </sub>
 </div>

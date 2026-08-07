@@ -8,6 +8,8 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-07
+
 ### Added
 
 - SSH server with public-key authentication, username-to-room resolution at
