@@ -74,3 +74,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A hung test should fail, not hold a CI runner until the job's own limit
+# kills it an hour later with no useful output. Well above what the slowest
+# test here needs, including a cold container pull.
+timeout = 120

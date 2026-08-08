@@ -107,17 +107,31 @@ class FakeFirecracker:
         self.body = body
         self.requests: list[bytes] = []
         self._server: asyncio.AbstractServer | None = None
+        self._writers: list[asyncio.StreamWriter] = []
 
     async def start(self, path: Path) -> None:
         self._server = await asyncio.start_unix_server(self._handle, str(path))
 
     async def stop(self) -> None:
+        # See the note in tests/test_vsock.py: from 3.12 `wait_closed()`
+        # waits on every accepted connection, and a handler that raised
+        # before closing its writer would hang the suite there.
+        for writer in self._writers:
+            writer.close()
+        self._writers.clear()
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        head = await reader.readuntil(b"\r\n\r\n")
+        self._writers.append(writer)
+        # A readiness probe connects and disconnects without saying anything,
+        # which lands here as an incomplete read.
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+        except (asyncio.IncompleteReadError, ConnectionError):
+            writer.close()
+            return
         length = _content_length(head)
         body = await reader.readexactly(length) if length else b""
         self.requests.append(head + body)
@@ -187,10 +201,12 @@ async def test_wait_ready_gives_up(tmp_path: Path) -> None:
 @pytestmark_unix
 async def test_chunked_response_is_refused_rather_than_misread(tmp_path: Path) -> None:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.readuntil(b"\r\n\r\n")
-        writer.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
-        await writer.drain()
-        writer.close()
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+            await writer.drain()
+        finally:
+            writer.close()
 
     sock = tmp_path / "api.sock"
     server = await asyncio.start_unix_server(handle, str(sock))

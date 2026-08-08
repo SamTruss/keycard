@@ -44,16 +44,28 @@ class FakeVsock:
         self.trailing = trailing
         self.requests: list[bytes] = []
         self._server: asyncio.AbstractServer | None = None
+        self._writers: list[asyncio.StreamWriter] = []
 
     async def start(self, path: Path) -> None:
         self._server = await asyncio.start_unix_server(self._handle, str(path))
 
     async def stop(self) -> None:
+        # Closed explicitly, because from 3.12 `wait_closed()` blocks until
+        # every accepted connection's transport is gone — and a stream
+        # server does not close one just because its handler returned. A
+        # fake that leaves them open hangs the test suite on that version
+        # and passes on the ones either side of it.
+        for writer in self._writers:
+            writer.close()
+        self._writers.clear()
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        # Tracked before the first await, so a client that disappears
+        # mid-handshake still leaves something for stop() to close.
+        self._writers.append(writer)
         self.requests.append(await reader.readline())
         if self.reply is None:
             # How Firecracker signals "nothing is listening in there".
