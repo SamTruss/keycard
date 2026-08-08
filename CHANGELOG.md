@@ -8,6 +8,11 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-08
+
+Shipped immediately behind 0.2.0, which was tagged but never published to
+PyPI — this is the first release carrying the microVM backend.
+
 ### Fixed
 
 - **A server shutdown hung, and leaked rooms, whenever anyone was connected.**
