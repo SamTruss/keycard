@@ -26,6 +26,18 @@ ruff format .       # format
 mypy src/           # types
 ```
 
+Two parts of the tree need more than that, and both skip cleanly without it,
+so a plain `pytest` is green either way:
+
+- **`guest-agent/`** is Rust — `cargo fmt`, `cargo clippy --all-targets`,
+  `cargo test` from inside that directory. Its tests stand vsock in with TCP;
+  see ARCHITECTURE.md on why that substitution has already hidden one bug.
+- **`tests/test_firecracker_integration.py`** boots real microVMs and needs
+  `/dev/kvm`, a `firecracker` binary, a guest kernel and a rootfs built by
+  `rootfs/build.sh`. Run it with `-rs` and it names the first thing missing.
+  Nothing in CI can run it, so if you change that backend, say in your PR
+  whether you booted one.
+
 ## Design principles
 
 These are the constraints the project is built around. PRs that cut against them are likely to be declined, so they're worth knowing up front.
@@ -34,11 +46,13 @@ These are the constraints the project is built around. PRs that cut against them
 
 **No custom client.** The user's existing `ssh` is the entire client story. Nothing that requires installing something on the connecting machine.
 
-**The backend is an interface.** v2 adds Firecracker without touching the SSH layer. Don't reach into Docker specifics from the session handler.
+**The backend is an interface.** Firecracker was added without `server.py` learning it exists, and the one change the session handler did need was a latent bug a slower backend exposed, not a special case. Don't reach into Docker specifics from the session handler.
+
+**keycard never needs privilege.** Not root, not `sudo`, not added capabilities — on any backend. This is a hard constraint, not a preference: it is why the microVM backend confines its VMM with Landlock instead of Firecracker's jailer, which requires root, and why tap networking is deferred rather than built. A design that needs elevated privileges will be declined even if it works, because SECURITY.md's whole scope rests on this one. If you think you've found the exception, open an issue before writing it.
 
 **Scope stays narrow.** Port forwarding, SFTP, persistent volumes, multi-user accounts and a web UI are all out. Each is defensible on its own; together they'd turn keycard into a platform, and platforms need configuring.
 
-**Security claims stay honest.** Don't describe v1 as isolation or sandboxing in a security sense. See [SECURITY.md](SECURITY.md).
+**Security claims stay honest.** Don't describe the Docker backend as isolation or sandboxing in a security sense. The Firecracker backend does make a real claim now, and it is scoped to rooms with no network — if you change what a room can reach, the claim gets re-scoped in the same PR rather than quietly outgrown. See [SECURITY.md](SECURITY.md).
 
 ## Releasing
 
