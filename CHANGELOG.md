@@ -8,6 +8,27 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A server shutdown hung, and leaked rooms, whenever anyone was connected.**
+  `serve()` awaited the listener's `wait_closed()` *before* draining active
+  sessions, and `asyncio.Server.wait_closed()` does not return until every
+  accepted connection has dropped as well as the listener — so shutdown
+  deadlocked against the one thing that closes those connections. In
+  practice: SIGINT/SIGTERM logged "shutting down" and then sat there with
+  containers still running until the last client happened to disconnect on
+  its own, making `shutdown_grace` meaningless exactly when it mattered.
+  The drain now runs first, and the wait after it is bounded so a client
+  that never drops its TCP connection cannot keep the process alive once
+  its rooms are already gone. Present since 0.1.0 but only reachable on
+  Python 3.12.1+, where `wait_closed()` gained its current semantics — on
+  3.11 it returned immediately, which is why nothing caught it sooner.
+- A session whose channel died mid-teardown raised an unretrieved
+  `BrokenPipeError` into the event loop, because `is_closing()` can still
+  report False on a channel that is already past sending. The room was
+  always destroyed correctly; this was noise in the log at exactly the
+  moment an operator is reading it.
+
 ## [0.2.0] - 2026-08-08
 
 The microVM backend, and the first real isolation claim keycard has made.
