@@ -15,10 +15,12 @@ failure modes are ours to clean up: a half-configured microVM leaves a
 running firecracker and a copied rootfs behind unless ``open`` unwinds
 itself, which is what ``_cleanup`` below is for.
 
-Nothing in this module has ever booted a microVM — see FIRECRACKER.md's
-hardware prerequisite. Everything that can be tested without ``/dev/kvm``
-lives in pure functions here and is covered by ``tests/test_firecracker.py``;
-the rest waits on ``tests/test_firecracker_integration.py`` and a real host.
+Everything that can be tested without ``/dev/kvm`` lives in pure functions
+here and is covered by ``tests/test_firecracker.py``; the rest is
+``tests/test_firecracker_integration.py``, which boots real microVMs and
+skips anywhere that can't. CI is one such place, so this module's real
+coverage only ever runs on a developer's machine — see FIRECRACKER.md's
+hardware prerequisite for what makes a host eligible.
 """
 
 from __future__ import annotations

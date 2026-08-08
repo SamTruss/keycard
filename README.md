@@ -142,7 +142,7 @@ cara@host  → rm 3 · isolated
 
 **`RM 105`** &nbsp;·&nbsp; Under renovation
 
-v1 runs on containers, which is enough to keep your machine clean. Real isolation needs Firecracker microVMs, and that's what v2 is for. It isn't built yet, so this page won't pretend otherwise — see the [roadmap](#roadmap).
+v1 runs on containers, which is enough to keep your machine clean. Real isolation needs Firecracker microVMs, and that's what v2 is for. Rooms boot as microVMs today, behind an opt-in `backend = "firecracker"` — but they have no network and don't run under the jailer yet, so the isolation claim still isn't being made. See the [roadmap](#roadmap).
 
 ---
 
@@ -276,8 +276,9 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 **v2 — Firecracker**
 
-- [ ] Backend abstraction
-- [ ] microVM provisioning, rootfs, tap networking
+- [x] Backend abstraction
+- [x] Rootfs builds, guest agent, microVM provisioning
+- [ ] Tap networking, jailer, the isolation claim
 
 **Deliberately not building:** port forwarding, SFTP, persistent volumes, multi-user accounts, web UI. Each is defensible alone; together they'd make keycard a platform, and platforms need configuring.
 
