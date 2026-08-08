@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So a branch can be checked before it's ready for a PR. Without this the
+  # only ways to run CI are opening one or pushing to main, which makes
+  # "green before review" cost a draft PR.
+  workflow_dispatch:
 
 permissions:
   contents: read
