@@ -23,6 +23,11 @@ CONFIG_DIR = Path.home() / ".config" / "keycard"
 # finish their room teardown before shutdown gives up and moves on.
 FORCE_CLOSE_TIMEOUT = 5.0
 
+# How long to wait for accepted connections to actually drop after their
+# rooms are gone. Only a backstop: the rooms are already destroyed by this
+# point, so the cost of giving up is a socket, not a container.
+CLOSE_TIMEOUT = 5.0
+
 
 class KeycardServer(asyncssh.SSHServer):
     """One instance per connection."""
@@ -221,9 +226,20 @@ async def serve(config: Config) -> None:
             loop.remove_signal_handler(sig)
 
         log.info("shutting down")
+        # Close the listener first so nothing new arrives, then drain — and in
+        # that order. `wait_closed()` does not return until every accepted
+        # connection has dropped as well as the listener, so awaiting it before
+        # the drain deadlocks shutdown against the one thing that would end it:
+        # `_drain` is what force-closes live sessions. Bounded afterwards too,
+        # because a client that never drops its TCP connection must not be able
+        # to keep the process alive once its rooms are already gone.
         server.close()
-        await server.wait_closed()
         await _drain(active, config.shutdown_grace_seconds)
+        try:
+            async with asyncio.timeout(CLOSE_TIMEOUT):
+                await server.wait_closed()
+        except TimeoutError:
+            log.warning("connections still open after drain; exiting anyway")
         # Nothing will ever run their expiry timers once this process exits.
         await kept.destroy_all()
         await backend.close()

@@ -278,9 +278,17 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
             if self._room is not None:
                 status = await self._checkout(room)
                 self._room = None
-                if not chan.is_closing():
-                    chan.write(banner.destroyed("checked out"))
-                    chan.exit(status)
+                # `is_closing()` is not a guarantee the write will land: a
+                # channel can be past sending without yet reporting closing,
+                # which is exactly what a server shutdown racing this produces.
+                # The room is already gone by here, so a goodbye nobody can
+                # receive is not worth an unretrieved exception in the log.
+                try:
+                    if not chan.is_closing():
+                        chan.write(banner.destroyed("checked out"))
+                        chan.exit(status)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    log.debug("channel gone before checkout could be reported")
 
     async def _feed(self, room: Room) -> None:
         """Queued client input into the room, in order.
