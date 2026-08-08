@@ -45,6 +45,11 @@ log = logging.getLogger(__name__)
 
 READ_SIZE = 65536
 
+# Every directory this backend creates. A room's instance directory holds
+# its disk image and, after `pause`, its RAM in the clear — none of which is
+# any other local user's business.
+OWNER_ONLY = 0o700
+
 # The guest agent's defaults (guest-agent/src/main.rs). The host must connect
 # to data first and control second: the agent accepts them in that order, so
 # reversing it deadlocks both sides.
@@ -198,7 +203,11 @@ class Instance:
         # something has leaked; uniqueness comes from the uuid.
         instance_id = f"{room_name}-{uuid.uuid4().hex[:12]}"
         path = runtime_dir / instance_id
-        path.mkdir(parents=True, exist_ok=False)
+        # 0700, because of what ends up in here: the room's whole disk image,
+        # its console, and — once `pause` has run — a plaintext dump of its
+        # RAM. The default runtime_dir is under /tmp, so inheriting the usual
+        # 0755 would put all of that within reach of every local user.
+        path.mkdir(parents=True, exist_ok=False, mode=OWNER_ONLY)
         return cls(id=instance_id, dir=path)
 
     @property
@@ -402,7 +411,11 @@ class FirecrackerBackend(Backend):
     def __init__(self, config: FirecrackerConfig) -> None:
         self._config = config
         self._binary = self._preflight()
-        config.runtime_dir.mkdir(parents=True, exist_ok=True)
+        config.runtime_dir.mkdir(parents=True, exist_ok=True, mode=OWNER_ONLY)
+        # `mkdir` leaves an existing directory's mode alone, and this one is
+        # under /tmp by default — where a previous release created it 0755,
+        # and where anyone can create it first.
+        config.runtime_dir.chmod(OWNER_ONLY)
         log.info(
             "firecracker backend ready: kernel=%s rootfs_dir=%s runtime_dir=%s",
             config.kernel,

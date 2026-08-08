@@ -140,10 +140,23 @@ See what a given config would offer:
 Connect from a client, once the server is running:
 .B ssh \-p 2222 python@yourhost
 .SH SECURITY
-Containers are hygiene, not an isolation boundary \(em see
+Containers are hygiene, not an isolation boundary. The default backend
+shares a kernel with the host, so a container escape is a host compromise.
+.PP
+The optional
+.B firecracker
+backend is a real boundary: a room is a microVM with its own kernel behind
+KVM and no network device, and guest escape is in scope for those rooms.
+It needs
+.I /dev/kvm
+and a built rootfs.
+.PP
+See
 .I SECURITY.md
-in the project repository for the full threat model before exposing
-keycard beyond a trusted network.
+in the project repository for the full threat model \(em including what a
+.B \-\-keep
+snapshot writes to disk \(em before exposing keycard beyond a trusted
+network.
 .SH AUTHOR
 Sam Truss
 .SH SEE ALSO

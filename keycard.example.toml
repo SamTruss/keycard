@@ -27,12 +27,13 @@ shutdown_grace = "30s"
 keep_window = "0"
 
 # What opens a room by default: "docker" (v1, the only one that has ever
-# been shipped) or "firecracker" (v2 — see FIRECRACKER.md). The microVM
-# backend boots and runs shells, but it is not finished: the guest has no
-# network at all yet, and firecracker is not run under the jailer, so do
-# not pick it for the isolation it is eventually meant to provide. It also
-# needs a host with /dev/kvm. Individual rooms can override this key, so a
-# mixed deployment is fine.
+# been shipped) or "firecracker" (v2 — see FIRECRACKER.md). A microVM room
+# has its own kernel behind KVM and no network device at all, and for those
+# rooms guest escape is in scope — the real boundary the Docker backend
+# never claimed. It needs a host with /dev/kvm and a rootfs built by
+# rootfs/build.sh, and it gives a room no outbound network whatsoever.
+# Read SECURITY.md before relying on it. Individual rooms can override this
+# key, so a mixed deployment is fine.
 backend = "docker"
 
 # Only read if something actually selects the firecracker backend, so a

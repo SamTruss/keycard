@@ -1,13 +1,15 @@
 # Firecracker Backend — Phased Plan
 
-Status: **Phases 0, 1, 2 and 4 done** (`guest-agent/`, `rootfs/`,
-`backends/firecracker.py`, `backends/confine.py`). Phase 2 boots real
-microVMs: `tests/test_firecracker_integration.py` runs green on a WSL2 host
-with `/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phase 4 confines
-the VMM without the root the jailer would have needed. **Phase 5 is next**
-and Phase 3 is deferred on purpose — see the note above Phase 3. This is
-the roadmap referenced by `SCOPE.md`'s v2 section, written down for the
-first time — previously only discussed, never committed.
+Status: **every phase done except Phase 3, which is deferred on purpose**
+(`guest-agent/`, `rootfs/`, `backends/firecracker.py`,
+`backends/confine.py`). Phase 2 boots real microVMs:
+`tests/test_firecracker_integration.py` runs green on a WSL2 host with
+`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phase 4 confines the
+VMM without the root the jailer would have needed. Phase 5 makes the
+isolation claim, scoped to rooms with no network — which is all of them,
+because Phase 3 is deliberately unbuilt; see the note above it. This is the
+roadmap referenced by `SCOPE.md`'s v2 section, written down for the first
+time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
 actually starts.
 
@@ -195,7 +197,7 @@ change that.
 > numbers below are names, not a sequence. The work order is 4, then 5, then
 > 3 — confine the VMM, then a security claim scoped to networkless rooms,
 > then networking if and when it earns its cost. Why is under Phase 3.
-> Phase 4 is done; Phase 5 is next.
+> Phases 4 and 5 are done. Only Phase 3 remains, and it is deferred.
 
 ### Phase 3 — Tap networking — **deferred, deliberately**
 
@@ -276,22 +278,38 @@ Two things Landlock does not cover, both deliberate:
   needs its own decision: drop it for this backend, or have the guest agent
   enforce it. USAGE.md says it is ignored.
 
-### Phase 5 — Update the security claim
+### Phase 5 — Update the security claim — **done**
 
-Only after the above is real and integration-tested: update `SECURITY.md`'s
-threat model to state actual VM-level isolation for rooms opened under the
-Firecracker backend — kept distinct from the Docker backend's
-namespace/cgroup-only claim, not blurred into one blanket statement. This
-is the phase that actually delivers on "v2 adds a real isolation boundary";
-don't claim it earlier.
+`SECURITY.md` now states VM-level isolation for rooms opened under the
+Firecracker backend, kept as its own section rather than blurred into one
+blanket statement with the Docker backend's namespace-only posture. Guest
+escape is in scope.
 
-The claim may be made **scoped to rooms with no network**, which is every
-Firecracker room today. That is not a weaker version of the promise — a
-guest with no NIC is the easiest boundary there is to defend, and "run
-something you don't fully trust" (see the `offline` room in
-`keycard.example.toml`) wants less network, not more. Scoping it this way
-means Phase 3 later spends a claim already held, rather than gambling one
-not yet earned.
+The claim is **scoped to rooms with no network**, which is every Firecracker
+room. That is not a weaker version of the promise — a guest with no NIC is
+the easiest boundary there is to defend, and "run something you don't fully
+trust" (see the `offline` room in `keycard.example.toml`) wants less
+network, not more. Phase 3 will therefore spend a claim already held rather
+than gamble one not yet earned.
+
+Each condition the claim rests on is checked rather than asserted: the
+guest has no network interface (asserted against a booted VM in
+`test_firecracker_integration.py`, reading `/sys/class/net` so a rootfs
+without `iproute2` still answers), the VMM is Landlock-confined (asserted
+by denial in `test_confine.py`, and read off a live VMM's `NoNewPrivs`),
+and the guest reaches the host only through vsock.
+
+**Writing the claim found a bug**, which is the argument for writing claims
+down. Instance directories were created `0755` under a default runtime
+directory of `/tmp/keycard`, so every local user on the host could read a
+room's disk image — and, after `pause`, a plaintext dump of its RAM. Now
+`0700`, with an existing directory tightened rather than trusted, since it
+lives somewhere anyone can create first.
+
+Two caveats are stated in `SECURITY.md` rather than fixed, because both are
+real: a `--keep` snapshot writes guest RAM to disk unencrypted, and both
+backends sit behind the same SSH front door, where a pre-auth flaw is a
+compromise regardless of backend.
 
 ## Questions this phase settled
 

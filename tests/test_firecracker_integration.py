@@ -288,6 +288,33 @@ async def test_the_guest_is_a_different_kernel_from_the_host(
     assert os.uname().release not in guest
 
 
+async def test_the_guest_has_no_network_interface_at_all(backend: FirecrackerBackend) -> None:
+    """The other half of the claim SECURITY.md now makes.
+
+    That claim is scoped to rooms with no network, and this is what makes
+    "no network" checkable rather than an assertion about the code: not a
+    firewall, not an isolated subnet — the guest kernel has no interface
+    besides loopback, because no virtio-net device was ever attached.
+
+    `/sys/class/net` rather than `ip link` deliberately: it comes from the
+    kernel, so a rootfs built from an image without iproute2 still answers.
+    The marker is assembled from a variable so that the pty's echo of the
+    command typed here cannot itself satisfy the match.
+    """
+    room = await backend.open(RoomConfig(name=ROOM, image="ubuntu:24.04"), 80, 24)
+    try:
+        await room.write(b"M=NET; echo \"$M:$(ls /sys/class/net | tr '\\n' ',')END\"\n")
+        output = await _read_until(room, b"NET:")
+        while b"END" not in output:
+            output += await room.read()
+    finally:
+        await room.destroy()
+
+    listing = output.split(b"NET:", 1)[1].split(b"END", 1)[0]
+    interfaces = {name for name in listing.strip().split(b",") if name}
+    assert interfaces == {b"lo"}, listing
+
+
 # -- helpers ----------------------------------------------------------------
 
 

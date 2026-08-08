@@ -72,13 +72,15 @@ keycard is a purpose-built SSH server that provisions disposable containers on c
 ## v2 — Firecracker
 
 Phased roadmap in [FIRECRACKER.md](FIRECRACKER.md). Rooms boot as microVMs
-now; what's left is everything that makes one safe to hand to a stranger.
+now, and for rooms with no network — which is all of them — guest escape is
+in scope. Networking is the one piece left, and it is deferred rather than
+merely unstarted.
 
 - [x] Backend interface abstraction (designed from day one, now exercised by a second implementation)
 - [x] Rootfs image builds (`rootfs/`, with the guest agent in `guest-agent/`)
 - [x] Firecracker microVM provisioning, including `--keep` as a VM snapshot
 - [x] Confining the VMM — Landlock rather than the jailer, which needs root
-- [ ] Real isolation boundary, claimed for rooms with no network, which is every microVM room today — next
+- [x] Real isolation boundary, claimed in SECURITY.md for rooms with no network, which is every microVM room
 - [ ] Tap networking — deliberately deferred, not merely unstarted; both ways of building it cost more security than the feature is currently worth. Reasoning under Phase 3 in [FIRECRACKER.md](FIRECRACKER.md).
 
 ## Deliberately out of scope
