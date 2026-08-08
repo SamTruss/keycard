@@ -1,9 +1,9 @@
 # Firecracker Backend — Phased Plan
 
-Status: **Phases 0 and 1 done** (`guest-agent/`, `rootfs/`). **Phase 2
-written but never booted** (`backends/firecracker.py`) — it is complete
-enough to run and unverifiable until a host with `/dev/kvm` exists; see the
-prerequisite below. Phases 3–5 not started.
+Status: **Phases 0, 1 and 2 done** (`guest-agent/`, `rootfs/`,
+`backends/firecracker.py`). Phase 2 has now booted real microVMs:
+`tests/test_firecracker_integration.py` runs green on a WSL2 host with
+`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phases 3–5 not started.
 This is the roadmap referenced by `SCOPE.md`'s v2 section, written down for
 the first time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
@@ -114,12 +114,12 @@ orphans become zombies for the life of the microVM — bounded by the VM's
 own life, and cheap to revisit if a room ever accumulates enough of them to
 matter.
 
-Verified as far as it can be without `/dev/kvm`: CI builds a real
-`ubuntu:24.04` rootfs on every PR and checks the agent and init are in the
-image and that the agent is statically linked. Whether the image *boots* is
-unverified — that needs Phase 2.
+CI builds a real `ubuntu:24.04` rootfs on every PR and checks the agent and
+init are in the image and that the agent is statically linked. The image is
+now also known to boot: Phase 2's integration tests run against exactly this
+artifact, though only on a host with `/dev/kvm`, which CI is not.
 
-### Phase 2 — `FirecrackerBackend` — **written, never booted**
+### Phase 2 — `FirecrackerBackend` — **booted and verified**
 
 `backends/firecracker.py` implements `Backend`/`Room`/`Kept` against the
 Firecracker REST-over-UNIX-socket control API. It went in as predicted:
@@ -151,6 +151,14 @@ right, so they are called out here rather than left in the code:
 - `PUT /snapshot/load` must be the **first call** on a fresh API socket. It
   restores machine config, drives and the vsock device wholesale, and
   Firecracker rejects it once anything else has been configured.
+- **A guest half-close is not relayed.** Firecracker closes the host's end
+  of a vsock connection only when the guest end closes *completely*. The
+  agent calling `shutdown(WR)` on the data channel returns `Ok` and reaches
+  the host as nothing at all, so `Room.read()` never sees EOF and a room
+  whose shell has exited hangs. The guest has to drop both halves — see
+  `detach` in `guest-agent/src/session.rs`. This is the one thing on this
+  list that no amount of unit testing found; it only appears against a real
+  microVM, because the TCP stand-in *does* propagate a half-close.
 
 **What is verified.** The wire format, the handshake parsing, the memory and
 vCPU mapping, the instance layout and the preflight failures are unit-tested
@@ -158,9 +166,28 @@ vCPU mapping, the instance layout and the preflight failures are unit-tested
 agent's bridge — including the reattach path `--keep` depends on — is tested
 end to end against a real shell over the TCP stand-in, in CI.
 
-**What is not.** No microVM has ever booted. `tests/test_firecracker_integration.py`
-is written and skips with a reason until a host qualifies. Until it has run,
-treat Phase 2 as unproven.
+**What the first boot changed.** All ten integration tests pass, but only
+after two bugs that no unit test could have found, both of which needed a
+real microVM — and, between them, the reason to distrust "written but never
+run":
+
+- The guest agent half-closed the data channel on shell exit (above). Every
+  room hung after its shell exited.
+- `session.py` dropped client input that arrived before `open()` returned.
+  A Docker room opens in about a second so nothing was ever typed into that
+  window; a microVM boot is long enough that the *first command of every
+  session* landed in it and was discarded. Input is queued now and flushed
+  once the room exists.
+
+Both have regression tests that fail against the old code
+(`an_exiting_shell_reports_and_closes` asserts a full close, not just a
+shutdown; `test_input_typed_while_the_room_opens_is_not_lost` uses a
+deliberately slow backend).
+
+**What is still not verified.** CI has no `/dev/kvm`, so
+`test_firecracker_integration.py` still skips there and the boot path is
+only covered on a host that qualifies. A self-hosted runner is what would
+change that.
 
 ### Phase 3 — Tap networking
 
@@ -218,14 +245,16 @@ don't claim it earlier.
 ## Sequencing
 
 Phases 0 and 1 were done without the KVM prerequisite, as expected — neither
-boots anything. Phase 2 is written on the same terms: everything that can be
-decided and tested without a microVM has been, and the rest is waiting on a
-host. That was worth doing rather than blocking, because the parts most
-likely to be wrong (the wire format, the handshake, the ordering
-constraints) are exactly the parts that don't need one.
+boots anything. Phase 2 was written on the same terms: everything that could
+be decided and tested without a microVM was, and the rest waited on a host.
+That was worth doing rather than blocking, because the parts most likely to
+be wrong (the wire format, the handshake, the ordering constraints) are
+exactly the parts that don't need one.
 
-What is left for Phase 2 is not more code, it is a boot. Until
-`test_firecracker_integration.py` has actually run, nothing here has proven
-anything, and Phases 3–5 shouldn't start — tap networking and a security
-claim built on an unbooted VM would be guesses stacked on a guess. No other
-in-flight work depends on any of this.
+That bet paid off only partly, and the shape of the miss is worth keeping.
+Every guess about the *wire format* was right and survived first contact.
+Both bugs the first boot found were about **lifecycle** — when a connection
+ends, and when a room starts — which is precisely what a stand-in transport
+and a fast backend hide. Phases 3–5 are now unblocked, but the lesson
+generalises to them: the timing-dependent parts of tap networking will not
+be provable without a booted VM either.

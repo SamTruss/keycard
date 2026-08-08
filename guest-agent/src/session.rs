@@ -17,7 +17,7 @@
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -52,6 +52,44 @@ type HostWriter = Box<dyn AsyncWrite + Unpin + Send>;
 /// discarded, which is the right answer for a room whose client is gone: the
 /// room survives, the scrollback does not.
 type AttachedWriter = Arc<Mutex<Option<HostWriter>>>;
+
+/// The tasks reading from the currently attached connection. Shared, because
+/// the shell-exit task has to be able to end an attachment too, not just
+/// `attach` — and between them they own the read halves of both channels.
+/// A std mutex rather than tokio's: it is only ever held to swap a vector,
+/// never across an await, and `Drop` cannot await.
+type Readers = Arc<StdMutex<Vec<JoinHandle<()>>>>;
+
+/// Take the reader tasks currently registered, leaving none behind.
+fn take_readers(readers: &Readers) -> Vec<JoinHandle<()>> {
+    readers
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+        .collect()
+}
+
+/// Drop the host connection completely — both directions of both channels.
+///
+/// Half-closing is not enough, and this is the whole reason the read halves
+/// are reachable from here. Firecracker relays a guest-side `shutdown(WR)`
+/// to nothing: it closes the host's end of a vsock connection only when the
+/// guest end closes *completely*. Leave the read half alive in a reader task
+/// and the host's `recv()` never returns 0, so a room whose shell has
+/// exited hangs until something else times out. Aborting the reader tasks
+/// drops the read halves, clearing the writer slots drops the write halves,
+/// and only then does the socket actually close.
+///
+/// Each handle is awaited after being aborted so that by the time this
+/// returns the halves are genuinely dropped, not merely scheduled to be.
+async fn detach(readers: &Readers, data_out: &AttachedWriter, ctrl_out: &AttachedWriter) {
+    for reader in take_readers(readers) {
+        reader.abort();
+        let _ = reader.await;
+    }
+    *data_out.lock().await = None;
+    *ctrl_out.lock().await = None;
+}
 
 #[repr(C)]
 struct Winsize {
@@ -115,8 +153,9 @@ pub struct Session {
     raw_fd: RawFd,
     running: Arc<AtomicBool>,
     /// Tasks belonging to the current connection, aborted when another one
-    /// takes over. The long-lived pty tasks are deliberately not in here.
-    readers: Vec<JoinHandle<()>>,
+    /// takes over or when the shell exits. The long-lived pty tasks are
+    /// deliberately not in here.
+    readers: Readers,
 }
 
 impl Session {
@@ -145,6 +184,7 @@ impl Session {
         let data_out: AttachedWriter = Arc::new(Mutex::new(None));
         let ctrl_out: AttachedWriter = Arc::new(Mutex::new(None));
         let running = Arc::new(AtomicBool::new(true));
+        let readers: Readers = Arc::new(StdMutex::new(Vec::new()));
 
         // pty -> whichever data connection is attached.
         let pump_out = {
@@ -185,6 +225,7 @@ impl Session {
             let data_out = data_out.clone();
             let ctrl_out = ctrl_out.clone();
             let running = running.clone();
+            let readers = readers.clone();
             tokio::spawn(async move {
                 let code = match child.wait().await {
                     Ok(status) => exit_code(status),
@@ -193,19 +234,24 @@ impl Session {
                 running.store(false, Ordering::SeqCst);
 
                 // Let the last of the shell's output through before the
-                // channel carrying it is closed.
+                // channel carrying it is closed. Awaited rather than just
+                // aborted, so the pump has certainly let go of the writer
+                // before the code below takes it away.
                 tokio::time::sleep(DRAIN_GRACE).await;
                 pump_out.abort();
+                let _ = pump_out.await;
 
                 if let Some(writer) = ctrl_out.lock().await.as_mut() {
                     let _ = writer.write_all(format!("exit {code}\n").as_bytes()).await;
                     let _ = writer.shutdown().await;
                 }
-                // Closing this is how the host learns the room ended: its
-                // read returns empty, which is the contract Room.read has.
-                if let Some(writer) = data_out.lock().await.as_mut() {
-                    let _ = writer.shutdown().await;
-                }
+
+                // Closing the data channel is how the host learns the room
+                // ended: its read returns empty, which is the contract
+                // Room.read has. It has to be a *full* close, which is why
+                // this drops both halves rather than calling shutdown() and
+                // leaving it there — see `detach` for what that costs.
+                detach(&readers, &data_out, &ctrl_out).await;
             });
         }
 
@@ -215,7 +261,7 @@ impl Session {
             ctrl_out,
             raw_fd,
             running,
-            readers: Vec::new(),
+            readers,
         })
     }
 
@@ -236,9 +282,10 @@ impl Session {
         D: AsyncRead + AsyncWrite + Unpin + Send + 'static,
         C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        for reader in self.readers.drain(..) {
-            reader.abort();
-        }
+        // The connection being displaced goes away completely, read halves
+        // included — the same full close the shell-exit path needs, for the
+        // same reason (see `detach`).
+        detach(&self.readers, &self.data_out, &self.ctrl_out).await;
 
         let (mut data_r, data_w) = tokio::io::split(data);
         let (ctrl_r, ctrl_w) = tokio::io::split(ctrl);
@@ -246,7 +293,7 @@ impl Session {
         *self.ctrl_out.lock().await = Some(Box::new(ctrl_w));
 
         let input = self.input.clone();
-        self.readers.push(tokio::spawn(async move {
+        let data_reader = tokio::spawn(async move {
             let mut buf = vec![0u8; BUF_SIZE];
             loop {
                 let n = match data_r.read(&mut buf).await {
@@ -257,11 +304,11 @@ impl Session {
                     break;
                 }
             }
-        }));
+        });
 
         let raw_fd = self.raw_fd;
         let running = self.running.clone();
-        self.readers.push(tokio::spawn(async move {
+        let ctrl_reader = tokio::spawn(async move {
             let mut lines = BufReader::new(ctrl_r).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Some((cols, rows)) = parse_resize(&line) {
@@ -272,13 +319,18 @@ impl Session {
                     }
                 }
             }
-        }));
+        });
+
+        self.readers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend([data_reader, ctrl_reader]);
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        for reader in self.readers.drain(..) {
+        for reader in take_readers(&self.readers) {
             reader.abort();
         }
     }
@@ -383,6 +435,27 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(10), host_ctrl_r.read_to_end(&mut ctrl)).await;
         assert!(String::from_utf8_lossy(&ctrl).contains("exit 7"));
         assert!(!session.is_running());
+
+        // Not just half-closed. Firecracker relays a guest `shutdown(WR)` to
+        // nothing — it closes the host's end of a vsock connection only when
+        // the guest end is gone completely — so leaving the read half alive
+        // in a reader task means the host's recv() never returns 0 and the
+        // room hangs after its shell has exited. A duplex pipe reports the
+        // same distinction: writing to it fails only once *both* halves of
+        // the far end have been dropped.
+        let unreachable = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if host_data_w.write_all(b"anyone there?\n").await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            unreachable.is_ok(),
+            "the guest still holds the read half — this is a half-close, not a close"
+        );
     }
 
     async fn read_until<R: AsyncRead + Unpin>(reader: &mut R, needle: &[u8]) -> Vec<u8> {
