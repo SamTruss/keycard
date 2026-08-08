@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from keycard.config import Config, RoomConfig, load, parse_duration
+from keycard.config import DEFAULT_CONFINEMENT, Config, RoomConfig, load, parse_duration
 
 
 def test_builtin_defaults_when_no_file(tmp_path: Path) -> None:
@@ -194,6 +194,42 @@ def test_shutdown_grace_loaded_from_toml(tmp_path: Path) -> None:
     cfg = load(toml)
     assert cfg.shutdown_grace == "1m"
     assert cfg.shutdown_grace_seconds == 60.0
+
+
+def test_confinement_defaults_to_best_effort(tmp_path: Path) -> None:
+    cfg = load(tmp_path / "nonexistent.toml")
+    assert cfg.firecracker.confinement == DEFAULT_CONFINEMENT
+
+
+def test_confinement_can_be_required(tmp_path: Path) -> None:
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[firecracker]
+confinement = "required"
+""",
+        encoding="utf-8",
+    )
+    assert load(toml).firecracker.confinement == "required"
+
+
+def test_an_unknown_confinement_warns_and_still_confines(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A typo must be loud, but must not leave the VMM less confined than
+    the default would have — losing the "refuse to run" guarantee is a much
+    smaller failure than losing the confinement."""
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[firecracker]
+confinement = "requird"
+""",
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+    assert cfg.firecracker.confinement == DEFAULT_CONFINEMENT
+    assert "requird" in caplog.text
 
 
 def test_room_without_image_is_skipped(tmp_path: Path) -> None:

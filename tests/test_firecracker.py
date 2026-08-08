@@ -195,6 +195,50 @@ def test_absent_kvm_is_refused_rather_than_discovered_on_first_boot(
         fc.FirecrackerBackend(config)
 
 
+# -- confinement ------------------------------------------------------------
+
+
+def _bootable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: object
+) -> FirecrackerConfig:
+    """A config whose only remaining question is the one under test."""
+    kernel = tmp_path / "vmlinux"
+    kernel.write_bytes(b"x")
+    monkeypatch.setattr(fc.shutil, "which", lambda _: "/usr/bin/firecracker")
+    monkeypatch.setattr(fc, "kvm_present", lambda: True)
+    return FirecrackerConfig(kernel=kernel, rootfs_dir=tmp_path, **kwargs)  # type: ignore[arg-type]
+
+
+def test_required_confinement_refuses_a_kernel_without_landlock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of `required`: an operator who asked for confinement
+    gets a server that will not run without it, rather than one that quietly
+    runs the VMM with keycard's own filesystem access."""
+    monkeypatch.setattr(fc.confine, "abi_version", lambda: 0)
+    config = _bootable(tmp_path, monkeypatch, runtime_dir=tmp_path / "run", confinement="required")
+    with pytest.raises(fc.FirecrackerError, match="no Landlock"):
+        fc.FirecrackerBackend(config)
+
+
+def test_best_effort_still_starts_without_landlock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(fc.confine, "abi_version", lambda: 0)
+    config = _bootable(
+        tmp_path, monkeypatch, runtime_dir=tmp_path / "run", confinement="best-effort"
+    )
+    fc.FirecrackerBackend(config)
+    assert "unconfined" in caplog.text
+
+
+def test_confinement_off_builds_no_ruleset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _bootable(tmp_path, monkeypatch, runtime_dir=tmp_path / "run", confinement="off")
+    backend = fc.FirecrackerBackend(config)
+    instance = fc.Instance.create(config.runtime_dir, "ubuntu")
+    assert backend._ruleset_for(instance) is None  # noqa: SLF001 - the decision under test
+
+
 # -- boot args --------------------------------------------------------------
 
 

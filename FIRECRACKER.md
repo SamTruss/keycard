@@ -1,12 +1,13 @@
 # Firecracker Backend — Phased Plan
 
-Status: **Phases 0, 1 and 2 done** (`guest-agent/`, `rootfs/`,
-`backends/firecracker.py`). Phase 2 has now booted real microVMs:
-`tests/test_firecracker_integration.py` runs green on a WSL2 host with
-`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phases 3–5 not started;
-the work order among them has changed to 4, 5, 3 — see the note above Phase
-3. This is the roadmap referenced by `SCOPE.md`'s v2 section, written down
-for the first time — previously only discussed, never committed.
+Status: **Phases 0, 1, 2 and 4 done** (`guest-agent/`, `rootfs/`,
+`backends/firecracker.py`, `backends/confine.py`). Phase 2 boots real
+microVMs: `tests/test_firecracker_integration.py` runs green on a WSL2 host
+with `/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phase 4 confines
+the VMM without the root the jailer would have needed. **Phase 5 is next**
+and Phase 3 is deferred on purpose — see the note above Phase 3. This is
+the roadmap referenced by `SCOPE.md`'s v2 section, written down for the
+first time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
 actually starts.
 
@@ -191,9 +192,10 @@ only covered on a host that qualifies. A self-hosted runner is what would
 change that.
 
 > **The order of the remaining phases changed after Phase 2 shipped.** The
-> numbers below are names, not a sequence. The work order is now 4, then 5,
-> then 3 — the jailer, then a security claim scoped to networkless rooms,
+> numbers below are names, not a sequence. The work order is 4, then 5, then
+> 3 — confine the VMM, then a security claim scoped to networkless rooms,
 > then networking if and when it earns its cost. Why is under Phase 3.
+> Phase 4 is done; Phase 5 is next.
 
 ### Phase 3 — Tap networking — **deferred, deliberately**
 
@@ -232,20 +234,47 @@ privilege that made the other option unattractive.
 Today `network = "none"` is an absolute guarantee — there is no NIC, so
 there is nothing to argue about. That is worth more than the feature.
 
-### Phase 4 — The jailer, and resource limits parity — **next**
+### Phase 4 — Confining the VMM — **done, without the jailer**
 
-Run firecracker under the jailer: chroot, cgroups, seccomp, dropped
-privileges. `firecracker_argv()` is the seam it slots into. This was
-sequenced after networking originally; it is now the next piece of work,
-because it is what the security claim actually rests on and it needs no new
-privilege for keycard itself.
+**The jailer needs root.** Run it as anyone else and it stops at
+`Failed to unshare into new mount namespace: Operation not permitted`. That
+was checked, not assumed, and it invalidated the reason this phase was
+pulled forward — the plan had it down as costing keycard no new privilege.
 
-Alongside it, map `RoomConfig`'s memory/cpus onto Firecracker's
-machine-config (`mem_size_mib`, vcpu count) and cgroups via the jailer.
-`pids_limit` doesn't map 1:1 — a microVM isn't sharing the host's process
-table with anything — so it needs its own decision: drop it for this
-backend, or reinterpret it as a limit the guest agent itself enforces.
-It is silently ignored today, and USAGE.md says so.
+But the jailer's model is "you are root, let me drop you safely", and
+keycard already starts where that ends. Measuring what it would actually
+have added:
+
+| jailer gives | already true |
+|---|---|
+| seccomp filtering | **yes** — firecracker installs its own by default; `--no-seccomp` is the opt-out |
+| an unprivileged uid | **yes** — the VMM inherits keycard's user |
+| chroot | no |
+| cgroups | no |
+| `fsize`/`no-file` rlimits | no, but `setrlimit` needs no privilege |
+
+So the gap was filesystem confinement and cgroups, not privilege dropping.
+The gap that mattered: without confinement a compromised VMM runs as the
+keycard user, and can read every other room's rootfs and
+`~/.config/keycard/host_key`.
+
+That is now closed by **Landlock** (`backends/confine.py`) — an unprivileged
+LSM, inherited across `execve`, which cuts the VMM down to its own instance
+directory, the guest kernel and `/dev/kvm`. The allowlist is short because
+firecracker is statically linked: no loader, no libraries. Configurable via
+`[firecracker] confinement`, defaulting to best-effort so a kernel without
+Landlock still runs, with `required` for anyone who would rather not.
+
+Two things Landlock does not cover, both deliberate:
+
+- **cgroups.** Unprivileged access means `systemd-run --user --scope`, which
+  needs a user D-Bus session a system service does not have, and wrapping
+  the VMM in a supervisor complicates every signal path in `_stop`. Guest
+  RAM is already capped by `mem_size_mib`, so what is uncovered is VMM
+  overhead, not guest allocation.
+- **`pids_limit`.** Still has no meaning for a microVM, still ignored, still
+  needs its own decision: drop it for this backend, or have the guest agent
+  enforce it. USAGE.md says it is ignored.
 
 ### Phase 5 — Update the security claim
 

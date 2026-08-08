@@ -24,6 +24,13 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 - The guest agent's TCP smoke test now runs in CI, covering the bridge end
   to end against a real shell — including reconnecting to a session whose
   host dropped, which is what `--keep` rests on.
+- The firecracker process is now confined with Landlock (Linux 5.13+) to
+  its own instance directory, the guest kernel and `/dev/kvm`, so a
+  compromised VMM can no longer read the SSH host key or any other room's
+  disk image. Firecracker's own jailer would have done this, but it has to
+  run as root; this needs no privilege at all. Configurable with
+  `[firecracker] confinement`, which also takes `required` for deployments
+  that would rather not start than run unconfined.
 
 ### Fixed
 

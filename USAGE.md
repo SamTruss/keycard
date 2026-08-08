@@ -116,10 +116,20 @@ the top level or per room. It works — rooms boot, shells run, `--keep`
 becomes a VM snapshot — but it is not finished and it is not the default:
 
 - The guest has **no network at all**. Not "isolated networking" — none.
-- firecracker runs unconfined; the jailer isn't wired up yet.
 - It needs a host with `/dev/kvm`, a guest kernel, and a rootfs built by
   `rootfs/build.sh`.
 - `pids_limit` has no meaning for a microVM and is ignored there.
+
+The VMM process itself is confined with [Landlock](https://docs.kernel.org/userspace-api/landlock.html)
+on Linux 5.13+, cutting it down to its own instance directory, the guest
+kernel and `/dev/kvm` — so a compromised VMM cannot read your host key or
+any other room's disk image. Set `confinement = "required"` under
+`[firecracker]` to refuse to start on a kernel that can't do that:
+
+```toml
+[firecracker]
+confinement = "required"
+```
 
 So it isn't yet the stronger isolation boundary it's eventually meant to
 be — pick it to try the thing, not to rely on it. Setup and current status

@@ -51,6 +51,16 @@ backend = "docker"
 # # How long a room may take to answer after the VM starts. Covers kernel
 # # boot and the rootfs init, so a slow first boot is not a failed one.
 # boot_timeout = "30s"
+# # How hard to insist on confining the VMM. keycard uses Landlock (Linux
+# # 5.13+) to cut the firecracker process down to its own instance
+# # directory, the guest kernel and /dev/kvm — so a VMM compromise cannot
+# # read your host key or any other room. Not the jailer: that needs root,
+# # and keycard would rather not.
+# #   "best-effort" (default) confine where the kernel supports it, log
+# #                 loudly where it doesn't
+# #   "required"    refuse to start on a kernel without Landlock
+# #   "off"         don't confine — escape hatch, not a tuning knob
+# confinement = "best-effort"
 
 # Rooms. Each key here becomes a valid SSH username:
 #   ssh -p 2222 python@yourhost

@@ -26,6 +26,7 @@ from pathlib import Path
 import asyncssh
 import pytest
 
+from keycard.backends import confine
 from keycard.backends.base import Room
 from keycard.backends.firecracker import FirecrackerBackend, FirecrackerKept, kvm_present
 from keycard.config import Config, FirecrackerConfig, RoomConfig
@@ -239,6 +240,33 @@ async def test_ssh_into_a_microvm(keycard_server: tuple[int, Path]) -> None:
     assert "checked-in" in output
 
 
+async def test_the_vmm_of_a_booted_room_is_actually_confined(
+    backend: FirecrackerBackend,
+) -> None:
+    """Confinement, read off the real process rather than the code that set it.
+
+    `test_confine.py` proves the ruleset denies what it should; this proves
+    the thing that ends up running a guest is the thing it was applied to.
+    `NoNewPrivs` is the observable half — nothing else in keycard sets it,
+    and Landlock refuses to restrict a process without it, so a 1 here means
+    `child_setup` ran in this VMM's own child.
+    """
+    if confine.abi_version() == 0:
+        pytest.skip("needs a kernel with Landlock")
+
+    room = await backend.open(RoomConfig(name=ROOM, image="ubuntu:24.04"), 80, 24)
+    try:
+        pid = room._vm.process.pid  # noqa: SLF001 - no public handle on the process
+        status = _proc(pid, "status")
+        limits = _proc(pid, "limits")
+    finally:
+        await room.destroy()
+
+    assert "NoNewPrivs:\t1" in status, status
+    fsize = next(line for line in limits.splitlines() if line.startswith("Max file size"))
+    assert "unlimited" not in fsize, fsize
+
+
 async def test_the_guest_is_a_different_kernel_from_the_host(
     keycard_server: tuple[int, Path],
 ) -> None:
@@ -261,6 +289,16 @@ async def test_the_guest_is_a_different_kernel_from_the_host(
 
 
 # -- helpers ----------------------------------------------------------------
+
+
+def _proc(pid: int, name: str) -> str:
+    """Read one of a process's procfs files.
+
+    Sync and outside the test body deliberately: procfs is a kernel table
+    formatted on read, not IO that can block, and the async-lint rule that
+    would otherwise fire here is aimed at real filesystems.
+    """
+    return Path(f"/proc/{pid}/{name}").read_text()
 
 
 async def _read_until(room: Room, needle: bytes, limit: float = 60.0) -> bytes:
