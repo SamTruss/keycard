@@ -1,8 +1,14 @@
 //! keycard guest agent — runs as PID 1 (or PID 1's child) inside a keycard
-//! Firecracker room. Listens on two ports, one per session at a time (see
+//! Firecracker room. Listens on two ports, one session at a time (see
 //! session.rs for why one-at-a-time is enough): a data port carrying raw
 //! pty bytes, and a control port carrying resize requests in and the exit
 //! status out. See FIRECRACKER.md, Phase 0.
+//!
+//! A connection is not a session. The shell outlives whichever connection is
+//! attached to it, so that a host which dropped away — and, under `--keep`,
+//! snapshotted the whole microVM in the meantime — can come back to the same
+//! shell rather than a fresh one. `serve` below is where that decision is
+//! made.
 //!
 //! Two transports share the same session logic: `vsock` is what a real
 //! microVM guest uses; `tcp` is a loopback stand-in so this binary can be
@@ -13,8 +19,11 @@ mod session;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
+
+use session::Session;
 
 const DEFAULT_DATA_PORT: u32 = 10000;
 const DEFAULT_CTRL_PORT: u32 = 10001;
@@ -118,6 +127,7 @@ async fn run_vsock(args: &Args) -> Result<()> {
         args.data_port, args.ctrl_port
     );
 
+    let mut live: Option<Session> = None;
     loop {
         let (data, _) = data_listener
             .accept()
@@ -127,12 +137,7 @@ async fn run_vsock(args: &Args) -> Result<()> {
             .accept()
             .await
             .context("accepting control connection")?;
-        eprintln!("keycard-guest-agent: session starting");
-        if let Err(err) = session::run(data, ctrl, &args.shell).await {
-            eprintln!("keycard-guest-agent: session error: {err:#}");
-        } else {
-            eprintln!("keycard-guest-agent: session ended");
-        }
+        live = Some(serve(live, data, ctrl, &args.shell).await?);
     }
 }
 
@@ -148,6 +153,7 @@ async fn run_tcp(args: &Args) -> Result<()> {
         args.tcp_bind, args.data_port, args.ctrl_port
     );
 
+    let mut live: Option<Session> = None;
     loop {
         let (data, _) = data_listener
             .accept()
@@ -157,11 +163,38 @@ async fn run_tcp(args: &Args) -> Result<()> {
             .accept()
             .await
             .context("accepting control connection")?;
-        eprintln!("keycard-guest-agent: session starting");
-        if let Err(err) = session::run(data, ctrl, &args.shell).await {
-            eprintln!("keycard-guest-agent: session error: {err:#}");
-        } else {
-            eprintln!("keycard-guest-agent: session ended");
-        }
+        live = Some(serve(live, data, ctrl, &args.shell).await?);
     }
+}
+
+/// Hand a new pair of connections to the session that is already running, or
+/// start one if there is nothing to hand them to.
+///
+/// The distinction is what makes `--keep` work. A dropped connection is not
+/// the end of a room: the host closes both channels, snapshots the microVM,
+/// and reconnects inside the keep window expecting the same shell with the
+/// same scrollback state (see FIRECRACKER.md, Phase 2). A shell that has
+/// actually exited is a different matter — that room is over, and the next
+/// connection is a new one.
+async fn serve<D, C>(live: Option<Session>, data: D, ctrl: C, shell: &str) -> Result<Session>
+where
+    D: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let mut session = match live {
+        Some(session) if session.is_running() => {
+            eprintln!("keycard-guest-agent: reattaching to the running session");
+            session
+        }
+        _ => {
+            eprintln!("keycard-guest-agent: session starting");
+            Session::start(shell)?
+        }
+    };
+    // Attaching only swaps writers and spawns reader tasks, so it returns
+    // immediately — which matters, because the accept loop above is what
+    // lets a reconnect displace a connection whose socket has not noticed it
+    // is dead yet.
+    session.attach(data, ctrl).await;
+    Ok(session)
 }

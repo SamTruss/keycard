@@ -56,6 +56,13 @@ jobs:
       - name: Integration tests
         run: pytest tests/test_integration.py -v
 
+      # Runs nowhere yet — a stock runner has no /dev/kvm (FIRECRACKER.md's
+      # hardware prerequisite). Listed explicitly anyway so the skip reason
+      # is printed on every run: a backend that silently stops being tested
+      # is how it silently stops working.
+      - name: Firecracker integration tests (skips without /dev/kvm)
+        run: pytest tests/test_firecracker_integration.py -v -rs
+
   guest-agent:
     # v2 prototype (FIRECRACKER.md, Phase 0) — not wired into the shipped
     # server. Kept in CI anyway so it doesn't silently bitrot on main.
@@ -84,6 +91,27 @@ jobs:
 
       - name: Unit tests
         run: cargo test
+
+      # The bridge end to end, against a real shell on a real pty. `--transport
+      # tcp` stands in for vsock (see FIRECRACKER.md, Phase 0), which is what
+      # lets this run on a stock runner — including the reattach path that
+      # `--keep` depends on, the one part of Phase 2 that can be verified
+      # without a microVM.
+      - name: Bridge smoke test
+        run: |
+          set -euo pipefail
+          ./target/debug/keycard-guest-agent --transport tcp --shell /bin/bash &
+          agent=$!
+          trap 'kill $agent 2>/dev/null || true' EXIT
+          # Checked with `ss`, not by connecting: the agent accepts data
+          # before control, so a throwaway probe connection would be sitting
+          # in a listener's backlog waiting to be handed to the session that
+          # the real client is about to open.
+          for _ in $(seq 1 50); do
+            if ss -ltn | grep -q ':10001 '; then break; fi
+            sleep 0.1
+          done
+          python3 test_client.py
 
   rootfs:
     # v2 prototype (FIRECRACKER.md, Phase 1) — not wired into the shipped
