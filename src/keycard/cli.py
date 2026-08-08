@@ -94,5 +94,7 @@ def rooms(config_path: Path | None) -> None:
             extras.append(f"cpus={room.cpus}")
         if room.network == "none":
             extras.append("offline")
+        if room.backend and room.backend != cfg.backend:
+            extras.append(room.backend)
         extra_str = f"  [{', '.join(extras)}]" if extras else ""
         click.echo(f"  {room.name:<{max_name}}  {room.image}{default}{extra_str}")
