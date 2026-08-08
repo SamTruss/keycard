@@ -26,6 +26,29 @@ shutdown_grace = "30s"
 # Also settable per-run with `keycard up --keep 10m`.
 keep_window = "0"
 
+# What opens a room by default: "docker" (v1, the only one that has ever
+# been shipped) or "firecracker" (v2 — see FIRECRACKER.md; written, but no
+# microVM has booted yet, and it needs a host with /dev/kvm). Individual
+# rooms can override this, so a mixed deployment is fine.
+backend = "docker"
+
+# Only read if something actually selects the firecracker backend, so a
+# Docker-only setup can ignore this whole table.
+#
+# [firecracker]
+# # An uncompressed vmlinux, not a distro bzImage — Firecracker boots ELF
+# # kernels directly, with no bootloader. Required; there is no default.
+# kernel = "/var/lib/keycard/vmlinux"
+# # Where `sudo rootfs/build.sh --room NAME` put its output. A room called
+# # "python" boots <rootfs_dir>/python.ext4 unless it names its own.
+# rootfs_dir = "/var/lib/keycard/rootfs"
+# # Per-microVM scratch: sockets, the room's rootfs copy, any snapshot, and
+# # the guest console log. Defaults to a "keycard" directory under $TMPDIR.
+# runtime_dir = "/run/keycard"
+# # How long a room may take to answer after the VM starts. Covers kernel
+# # boot and the rootfs init, so a slow first boot is not a failed one.
+# boot_timeout = "30s"
+
 # Rooms. Each key here becomes a valid SSH username:
 #   ssh -p 2222 python@yourhost
 
@@ -46,3 +69,14 @@ memory = "1g"
 # — though see SECURITY.md on what v1 does and does not protect against.
 image = "ubuntu:24.04"
 network = "none"
+
+# [rooms.vm]
+# # One room on the other backend. `image` still names the Docker image the
+# # rootfs was derived from, so keycard.toml stays the single definition of
+# # what a room is — rootfs/build.sh resolves it through this same config.
+# image = "ubuntu:24.04"
+# backend = "firecracker"
+# memory = "1g"
+# cpus = 2
+# # Optional; defaults to <rootfs_dir>/vm.ext4.
+# rootfs = "/var/lib/keycard/rootfs/ubuntu.ext4"

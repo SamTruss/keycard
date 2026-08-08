@@ -11,7 +11,7 @@ from pathlib import Path
 import asyncssh
 
 from .backends.base import Backend
-from .backends.docker import DockerBackend
+from .backends.routing import RoutingBackend
 from .config import Config, RoomConfig
 from .session import ActiveSessions, KeptRooms, RoomSession
 
@@ -130,7 +130,7 @@ async def create_server(
     log.debug("shutdown grace: %.0fs", config.shutdown_grace_seconds)
     log.debug("keep window: %.0fs (0 disables --keep)", config.keep_window_seconds)
     if backend is None:
-        backend = DockerBackend()
+        backend = RoutingBackend(config)
 
     host = host_override if host_override is not None else config.host
     port = port_override if port_override is not None else config.port
@@ -180,7 +180,7 @@ async def _drain(active: ActiveSessions, grace: float) -> None:
 
 
 async def serve(config: Config) -> None:
-    backend: Backend = DockerBackend()
+    backend: Backend = RoutingBackend(config)
     active = ActiveSessions()
     kept = KeptRooms(backend, config.keep_window_seconds)
     server = await create_server(config, backend, active_sessions=active, kept_rooms=kept)
@@ -188,6 +188,7 @@ async def serve(config: Config) -> None:
     rooms = ", ".join(f"{r.name} ({r.image})" for r in config.rooms.values())
     log.info("keycard listening on port %s", config.port)
     log.info("rooms: %s (default: %s)", rooms, config.default_room)
+    log.info("backend: %s", config.backend)
     log.info("try: ssh -p %s ubuntu@localhost", config.port)
     if kept.enabled:
         log.info("--keep enabled: %.0fs to reconnect after a dropped session", kept.window_seconds)

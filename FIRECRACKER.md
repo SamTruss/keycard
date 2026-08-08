@@ -1,7 +1,9 @@
 # Firecracker Backend — Phased Plan
 
-Status: **Phases 0 and 1 done** (`guest-agent/`, `rootfs/`). Phases 2–5 not
-started, and Phase 2 is blocked on hardware — see the prerequisite below.
+Status: **Phases 0, 1 and 2 done** (`guest-agent/`, `rootfs/`,
+`backends/firecracker.py`). Phase 2 has now booted real microVMs:
+`tests/test_firecracker_integration.py` runs green on a WSL2 host with
+`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phases 3–5 not started.
 This is the roadmap referenced by `SCOPE.md`'s v2 section, written down for
 the first time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
@@ -42,20 +44,43 @@ source of truth; the Firecracker rootfs is a derived artifact of them, so
 ## Hard prerequisite
 
 Real `/dev/kvm` access — nested virtualization or bare metal. GitHub Actions
-Ubuntu runners don't expose it, so:
+Ubuntu runners don't expose it, so integration coverage here needs a
+self-hosted runner before it's real. Don't fake it by mocking the KVM
+boundary away; that defeats the point of testing a security boundary.
 
-- Dev work needs a bare-metal Linux box or a cloud instance with nested
-  virt enabled (GCP/Azure support this; check before assuming AWS does for
-  the instance type in use).
-- CI can't run this backend's integration tests on the current runner
-  matrix. Mirror the existing Docker split (`_docker_available()` gates
-  `test_integration.py`) with an equivalent availability check, and accept
-  that integration coverage here needs a self-hosted runner before it's
-  real — don't fake it by mocking the KVM boundary away, that defeats the
-  point of testing a security boundary.
+### Making a host eligible
 
-Nothing past Phase 0 can be verified without this. Confirm the dev
-environment before investing in Phase 1+.
+`tests/test_firecracker_integration.py` checks all of this and names the
+first thing missing, so the fastest way to find out where a host stands is
+to run it.
+
+1. **Hardware virtualization exposed to the OS.** `grep -oE 'vmx|svm'
+   /proc/cpuinfo | head -1` prints something, and `ls -l /dev/kvm` exists.
+   WSL2 on a recent Windows 11 build does expose it, which makes a Windows
+   dev box a viable Phase 2 host — it was assumed not to be for a long time,
+   so check rather than assume.
+2. **Read/write on `/dev/kvm`.** `sudo usermod -aG kvm $USER`, then start a
+   new login session (`wsl --shutdown` on WSL). Membership doesn't apply to
+   already-running shells.
+3. **The firecracker binary on `PATH`.** A release download is enough; there
+   is no daemon and nothing to configure.
+4. **A guest kernel** — an uncompressed `vmlinux`, not a distro `bzImage`.
+   Firecracker boots ELF kernels directly with no bootloader.
+5. **A rootfs** — `sudo rootfs/build.sh --room ubuntu` writes
+   `rootfs/build/ubuntu.ext4`. Put it where `[firecracker] rootfs_dir`
+   points, named after the room.
+
+Then:
+
+```bash
+export KEYCARD_TEST_KERNEL=/var/lib/keycard/vmlinux
+export KEYCARD_TEST_ROOTFS_DIR=/var/lib/keycard/rootfs
+pytest tests/test_firecracker_integration.py -v -rs
+```
+
+When a boot fails, the guest console is in `console.log` inside the
+instance directory under `[firecracker] runtime_dir`. It is usually the only
+thing that says why.
 
 ## Phases
 
@@ -89,30 +114,80 @@ orphans become zombies for the life of the microVM — bounded by the VM's
 own life, and cheap to revisit if a room ever accumulates enough of them to
 matter.
 
-Verified as far as it can be without `/dev/kvm`: CI builds a real
-`ubuntu:24.04` rootfs on every PR and checks the agent and init are in the
-image and that the agent is statically linked. Whether the image *boots* is
-unverified — that needs Phase 2.
+CI builds a real `ubuntu:24.04` rootfs on every PR and checks the agent and
+init are in the image and that the agent is statically linked. The image is
+now also known to boot: Phase 2's integration tests run against exactly this
+artifact, though only on a host with `/dev/kvm`, which CI is not.
 
-### Phase 2 — `FirecrackerBackend`
+### Phase 2 — `FirecrackerBackend` — **booted and verified**
 
-Implements `Backend`/`Room`/`Kept` against the Firecracker REST-over-UNIX-socket
-control API.
+`backends/firecracker.py` implements `Backend`/`Room`/`Kept` against the
+Firecracker REST-over-UNIX-socket control API. It went in as predicted:
+`session.py` and `server.py`'s session handling did not change, so the seam
+held.
 
-- `Room.read`/`write` drive the vsock connection to the Phase 0 agent — same
-  shape as `DockerRoom.read`/`write`'s `loop.sock_recv`/`sock_sendall`
-  directly on the unwrapped socket; that pattern should translate with
-  little change.
-- `Room.pause()` / `Kept` / `Backend.resume()`: Firecracker supports
-  snapshot/restore natively. `pause()` snapshots to disk and `Kept` carries
-  the snapshot path; `resume()` restores from it. This is the microVM
-  equivalent of Docker's pause/unpause and should slot into the existing
-  `--keep` machinery (`KeptRooms` in `session.py`) unchanged — that registry
-  doesn't know or care what's inside a `Kept`.
-- `Room.destroy()`: stop the microVM process, clean up the rootfs
-  copy-on-write layer and any snapshot. Must stay idempotent under the same
-  contract `DockerRoom.destroy()` documents — the "many ways a room ends"
-  table in `ARCHITECTURE.md` applies unchanged to this backend.
+- `Room.read`/`write` drive the vsock connection to the Phase 0 agent,
+  `loop.sock_recv`/`sock_sendall` directly on the unwrapped socket — the same
+  shape as `DockerRoom`, as expected.
+- `Room.pause()` / `Kept` / `Backend.resume()`: `pause()` pauses the VM,
+  snapshots it to disk, and stops the process; `resume()` launches a fresh
+  firecracker and loads the snapshot back. Unlike Docker's freezer this
+  actually frees the guest's RAM, at the cost of writing it out.
+- `Room.destroy()`: stop the process, remove the instance directory. Kept
+  idempotent under the same contract `DockerRoom.destroy()` documents.
+
+Everything a microVM owns — API socket, vsock socket, the room's rootfs
+copy, its snapshot, the guest console log — lives in one instance directory,
+so tearing a room down is one `rmtree` and there is no second store to reap.
+
+Three pieces of the wire format are not obvious and cost real time to get
+right, so they are called out here rather than left in the code:
+
+- The host must connect to the guest agent's **data port before its control
+  port**. The agent accepts in that order; reversing it deadlocks both sides.
+- Firecracker's vsock handshake reply must be read **one byte at a time**. A
+  buffered read swallows whatever session bytes arrived behind the newline,
+  and those are the first thing the shell ever said.
+- `PUT /snapshot/load` must be the **first call** on a fresh API socket. It
+  restores machine config, drives and the vsock device wholesale, and
+  Firecracker rejects it once anything else has been configured.
+- **A guest half-close is not relayed.** Firecracker closes the host's end
+  of a vsock connection only when the guest end closes *completely*. The
+  agent calling `shutdown(WR)` on the data channel returns `Ok` and reaches
+  the host as nothing at all, so `Room.read()` never sees EOF and a room
+  whose shell has exited hangs. The guest has to drop both halves — see
+  `detach` in `guest-agent/src/session.rs`. This is the one thing on this
+  list that no amount of unit testing found; it only appears against a real
+  microVM, because the TCP stand-in *does* propagate a half-close.
+
+**What is verified.** The wire format, the handshake parsing, the memory and
+vCPU mapping, the instance layout and the preflight failures are unit-tested
+(`tests/test_fcapi.py`, `test_vsock.py`, `test_firecracker.py`). The guest
+agent's bridge — including the reattach path `--keep` depends on — is tested
+end to end against a real shell over the TCP stand-in, in CI.
+
+**What the first boot changed.** All ten integration tests pass, but only
+after two bugs that no unit test could have found, both of which needed a
+real microVM — and, between them, the reason to distrust "written but never
+run":
+
+- The guest agent half-closed the data channel on shell exit (above). Every
+  room hung after its shell exited.
+- `session.py` dropped client input that arrived before `open()` returned.
+  A Docker room opens in about a second so nothing was ever typed into that
+  window; a microVM boot is long enough that the *first command of every
+  session* landed in it and was discarded. Input is queued now and flushed
+  once the room exists.
+
+Both have regression tests that fail against the old code
+(`an_exiting_shell_reports_and_closes` asserts a full close, not just a
+shutdown; `test_input_typed_while_the_room_opens_is_not_lost` uses a
+deliberately slow backend).
+
+**What is still not verified.** CI has no `/dev/kvm`, so
+`test_firecracker_integration.py` still skips there and the boot path is
+only covered on a host that qualifies. A self-hosted runner is what would
+change that.
 
 ### Phase 3 — Tap networking
 
@@ -138,25 +213,48 @@ namespace/cgroup-only claim, not blurred into one blanket statement. This
 is the phase that actually delivers on "v2 adds a real isolation boundary";
 don't claim it earlier.
 
-## Open questions
+## Questions this phase settled
 
-- **jailer vs. raw `firecracker` process.** Jailer is upstream's hardened
-  default (seccomp + chroot + cgroup setup) but adds real setup complexity.
-  Default to jailer unless it blocks early dev velocity.
-- **Snapshot storage lifecycle.** Unlike Docker's pause (near-zero cost),
-  a Firecracker snapshot is real disk. `--keep` window expiry needs to
-  reap these promptly — `KeptRooms._expire()` already does the timing,
-  but the Firecracker `destroy_kept()` needs to actually free the disk,
-  not just stop a process.
-- **Backend selection.** Global server flag, or a per-room `backend =
-  "firecracker"` key in `keycard.toml`? Per-room is more flexible but adds
-  a config surface; needs a decision before `cli.py`/`config.py` changes.
+- **jailer vs. raw `firecracker` process** — *raw first, jailer before Phase
+  5.* The isolation boundary is KVM either way; the jailer hardens the host
+  against a compromised firecracker process, which is defence in depth rather
+  than the boundary itself. Writing its chroot/cgroup/seccomp setup before
+  anything had ever booted would have meant debugging two unverified layers
+  at once. `firecracker_argv()` is the seam it slots into.
+- **Snapshot storage lifecycle** — *no separate store.* Everything one
+  microVM owns lives in a single instance directory, the snapshot and memory
+  file included, so `destroy_kept()` reclaims the disk with one `rmtree`.
+- **Backend selection** — *both.* A per-room `backend = "firecracker"` key,
+  with a top-level `backend` as the default. The config key was never the
+  expensive part: `KeptRooms` calls `destroy_kept()` on a paused room long
+  after its session is gone, so routing needs a registry that can find the
+  backend a given `Kept` came from. Once that exists, a server-level default
+  is a fallback lookup. See `backends/routing.py` — the registry is itself a
+  `Backend`, so nothing above the seam learned that there is more than one.
+
+## Still open
+
+- **`pids_limit` for a microVM** (Phase 4). It doesn't map: a guest isn't
+  sharing the host's process table with anything. Drop it for this backend,
+  or reinterpret it as something the guest agent enforces.
+- **Trailing pty output on exit.** The agent gives the pty a 50ms drain
+  before closing the data channel, which is a mitigation, not a fix. The
+  proper answer is to read the pty to EOF, which risks hanging on an orphan
+  holding the slave open.
 
 ## Sequencing
 
-Phases 0 and 1 are done without the KVM prerequisite, as expected — neither
-boots anything. Phase 2 (`FirecrackerBackend`) is where that runs out: it
-can't be verified end to end without a `/dev/kvm`-capable host, and this
-project doesn't have one yet. Confirm that environment before starting
-Phase 2 — it's the actual blocker, not a matter of not having got to it. No
-other in-flight work depends on any of this.
+Phases 0 and 1 were done without the KVM prerequisite, as expected — neither
+boots anything. Phase 2 was written on the same terms: everything that could
+be decided and tested without a microVM was, and the rest waited on a host.
+That was worth doing rather than blocking, because the parts most likely to
+be wrong (the wire format, the handshake, the ordering constraints) are
+exactly the parts that don't need one.
+
+That bet paid off only partly, and the shape of the miss is worth keeping.
+Every guess about the *wire format* was right and survived first contact.
+Both bugs the first boot found were about **lifecycle** — when a connection
+ends, and when a room starts — which is precisely what a stand-in transport
+and a fast backend hide. Phases 3–5 are now unblocked, but the lesson
+generalises to them: the timing-dependent parts of tap networking will not
+be provable without a booted VM either.
