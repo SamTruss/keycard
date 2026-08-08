@@ -8,15 +8,21 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-08
+
+The microVM backend, and the first real isolation claim keycard has made.
+Opt-in, and the Docker backend is untouched and still the default — an
+existing install behaves exactly as it did on 0.1.3.
+
 ### Added
 
-- `FirecrackerBackend` (v2, `FIRECRACKER.md` Phase 2): rooms as microVMs, the
-  pty reached over vsock through the guest agent, and `--keep` implemented
-  as a Firecracker snapshot. Booted and verified against real microVMs on a
-  host with `/dev/kvm`; the integration tests skip anywhere without one, so
-  CI does not exercise it. Not the default and not finished — the microVM
-  still has no network and does not run under the jailer, so it is not yet
-  the isolation story `SECURITY.md` will eventually tell.
+- `FirecrackerBackend` (v2): rooms as microVMs, the pty reached over vsock
+  through a guest agent, and `--keep` implemented as a Firecracker
+  snapshot. Booted and verified against real microVMs on a host with
+  `/dev/kvm`; the integration tests skip anywhere without one, so CI does
+  not exercise it. Opt-in via `backend = "firecracker"`, and it needs a
+  guest kernel and a rootfs built by `rootfs/build.sh`. A microVM room has
+  no network at all — see `FIRECRACKER.md` for why that is deliberate.
 - Backend selection: a `backend` key at the top level and per room, so a
   deployment can mix the two. Rooms that don't name one use the default.
 - A `[firecracker]` config table (guest kernel, rootfs directory, runtime
