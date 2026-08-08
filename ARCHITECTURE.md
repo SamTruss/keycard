@@ -47,6 +47,7 @@ interactive only — see `RoomSession.exec_requested`).
 | `backends/vsock.py` | The vsock plumbing under that backend: the Firecracker `CONNECT`/`OK` handshake, and the two channels (pty data, control) the guest agent speaks over. |
 | `backends/fcapi.py` | Firecracker's REST-over-a-UNIX-socket control API, which is how a VM gets configured, booted, snapshotted and restored. |
 | `backends/routing.py` | `RoutingBackend`: itself a `Backend`, so that per-room backend selection stays invisible above the seam. |
+| `backends/confine.py` | Landlock and rlimits for the VMM process — what the Firecracker jailer would have done, minus the root it would have needed. |
 
 Two trees outside `src/` belong to the microVM backend: `guest-agent/` (the
 Rust pty agent that runs as PID 1 inside a room) and `rootfs/` (the script

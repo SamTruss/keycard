@@ -69,6 +69,13 @@ class RoomConfig:
 # nothing.
 DEFAULT_BOOT_ARGS = "init=/usr/sbin/keycard-init console=ttyS0 reboot=k panic=1 pci=off"
 
+# Confine where the kernel allows it, rather than refusing to run on a
+# kernel without Landlock. "required" is there for anyone who wants the
+# stricter posture, but it cannot be the default without breaking hosts
+# that work today.
+CONFINEMENT_MODES = frozenset({"required", "best-effort", "off"})
+DEFAULT_CONFINEMENT = "best-effort"
+
 
 @dataclass
 class FirecrackerConfig:
@@ -91,6 +98,12 @@ class FirecrackerConfig:
     runtime_dir: Path = Path(tempfile.gettempdir()) / "keycard"
     boot_args: str = DEFAULT_BOOT_ARGS
     boot_timeout: str = "30s"
+    # How hard to insist on confining the VMM (see backends/confine.py).
+    # "best-effort" applies Landlock where the kernel has it and logs where
+    # it doesn't; "required" refuses to start without it, for a deployment
+    # that would rather not run than run unconfined; "off" is the escape
+    # hatch for a kernel where it misbehaves.
+    confinement: str = DEFAULT_CONFINEMENT
 
     @property
     def boot_timeout_seconds(self) -> float:
@@ -195,6 +208,25 @@ def _parse_rooms(raw: dict[str, object]) -> dict[str, RoomConfig]:
     return rooms
 
 
+def _confinement(mode: str) -> str:
+    """Validate the confinement mode, warning rather than refusing to start.
+
+    Same posture as `_backend` above, and the downgrade is mild for the same
+    reason it is loud: the fallback still confines wherever the kernel can,
+    so a typo costs the "refuse to run unconfined" guarantee rather than the
+    confinement itself.
+    """
+    if mode in CONFINEMENT_MODES:
+        return mode
+    log.warning(
+        "unknown confinement %r (known: %s); using %s",
+        mode,
+        ", ".join(sorted(CONFINEMENT_MODES)),
+        DEFAULT_CONFINEMENT,
+    )
+    return DEFAULT_CONFINEMENT
+
+
 def _parse_firecracker(raw: dict[str, object]) -> FirecrackerConfig:
     fc = FirecrackerConfig()
     table = raw.get("firecracker", {})
@@ -213,6 +245,8 @@ def _parse_firecracker(raw: dict[str, object]) -> FirecrackerConfig:
         fc.boot_args = str(table["boot_args"])
     if "boot_timeout" in table:
         fc.boot_timeout = str(table["boot_timeout"])
+    if "confinement" in table:
+        fc.confinement = _confinement(str(table["confinement"]))
     return fc
 
 

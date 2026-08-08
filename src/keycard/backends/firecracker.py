@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import socket
 import subprocess
@@ -36,7 +37,7 @@ from pathlib import Path
 from typing import cast
 
 from ..config import FirecrackerConfig, RoomConfig
-from . import vsock
+from . import confine, vsock
 from .base import Backend, Kept, Room
 from .fcapi import SNAPSHOT_TIMEOUT, FirecrackerApi
 
@@ -107,9 +108,10 @@ def machine_config(room: RoomConfig) -> dict[str, int]:
 
     Both keys are required by the API, so unlike the Docker backend — where
     an unset ``memory``/``cpus`` simply leaves a default alone — there is
-    always a number to supply here. Full resource parity (cgroups via the
-    jailer, and what ``pids_limit`` should even mean for a microVM) is
-    Phase 4; this is the part the VM cannot boot without.
+    always a number to supply here. This is also where the guest's RAM
+    ceiling comes from, which is why ``confine.py`` does not chase cgroups:
+    the guest cannot allocate past this number in the first place.
+    ``pids_limit`` still has no meaning for a microVM and is still ignored.
     """
     return {
         "vcpu_count": max(1, min(room.cpus or DEFAULT_VCPUS, MAX_VCPUS)),
@@ -143,15 +145,14 @@ def kvm_present() -> bool:
 
 
 def firecracker_argv(binary: str, api_sock: Path) -> list[str]:
-    """The argv for a raw (un-jailed) firecracker process.
+    """The argv for the firecracker process.
 
-    Its own function because it is exactly what the jailer replaces: same API
-    socket, but wrapped in a chroot with its own cgroup and seccomp setup.
-    Running raw first is deliberate (see FIRECRACKER.md's open questions) —
-    the VM boundary is KVM either way, and writing the jailer's setup before
-    anything has ever booted means debugging two unverified layers at once.
-    Adding it later should mean a second function beside this one, not
-    surgery on `open`.
+    Deliberately still un-jailed. The jailer would replace this whole line —
+    same API socket, wrapped in a chroot with cgroups — but it has to be run
+    as root to do that, and a keycard that runs as root is the thing this
+    backend is trying not to become. The confinement it would have provided
+    is applied to the child instead; see `backends/confine.py`, and
+    FIRECRACKER.md's Phase 4 for how that decision was reached.
     """
     return [binary, "--api-sock", str(api_sock)]
 
@@ -437,7 +438,35 @@ class FirecrackerBackend(Backend):
                 "/dev/kvm is not present — the firecracker backend needs hardware "
                 "virtualization (bare metal, or a VM with nested virt enabled)"
             )
+        self._check_confinement()
         return binary
+
+    def _check_confinement(self) -> None:
+        """Decide once, at startup, whether the VMM will be confined.
+
+        A kernel without Landlock is a property of the host, so finding out
+        about it here — rather than per room — is both cheaper and the only
+        way `required` can mean anything: refusing the first check-in of the
+        day is not a security posture, it is an outage.
+        """
+        mode = self._config.confinement
+        if mode == "off":
+            log.warning("firecracker confinement is off; the VMM runs with keycard's own access")
+            return
+        abi = confine.abi_version()
+        if abi:
+            log.info("firecracker VMMs will be confined with Landlock (ABI %d)", abi)
+            return
+        if mode == "required":
+            raise FirecrackerError(
+                "[firecracker] confinement = 'required' but this kernel has no Landlock "
+                "(needs Linux 5.13+ with CONFIG_SECURITY_LANDLOCK) — set it to "
+                "'best-effort' to run anyway"
+            )
+        log.warning(
+            "no Landlock on this kernel (needs Linux 5.13+); firecracker will run "
+            "unconfined, with the same filesystem access as keycard itself"
+        )
 
     def rootfs_for(self, room: RoomConfig) -> Path:
         """Where *room*'s built image lives.
@@ -450,22 +479,60 @@ class FirecrackerBackend(Backend):
             return Path(room.rootfs).expanduser()
         return self._config.rootfs_dir / f"{room.name}.ext4"
 
+    def _ruleset_for(self, instance: Instance) -> int | None:
+        """The Landlock ruleset this microVM's VMM will be held to.
+
+        None means unconfined, which `_preflight` has already decided is
+        acceptable — either the mode is "off" or the kernel has no Landlock
+        and the mode allows that. Everything the VMM legitimately touches is
+        named here, so a path that turns out to be missing shows up as a
+        boot failure rather than as a silent weakening.
+        """
+        if self._config.confinement == "off":
+            return None
+        assert self._config.kernel is not None  # noqa: S101 - _preflight guarantees this
+        plan = confine.plan_for(
+            binary=Path(self._binary),
+            kernel=self._config.kernel,
+            instance_dir=instance.dir,
+        )
+        return confine.build_ruleset(plan)
+
+    def _fsize_for(self, instance: Instance, mem_mib: int) -> int:
+        """A file-size ceiling above everything the VMM legitimately writes.
+
+        Both floors matter: writes land at offsets up to the rootfs image's
+        size, and a snapshot's memory file is exactly guest RAM. Taking only
+        one of them would make either a big room or `pause` fail with
+        SIGXFSZ, which is a miserable thing to debug.
+        """
+        rootfs_bytes = instance.rootfs.stat().st_size if instance.rootfs.exists() else 0
+        return confine.fsize_limit(rootfs_bytes, mem_mib * 1024 * 1024)
+
     # -- process lifecycle ---------------------------------------------------
 
-    async def _spawn(self, instance: Instance) -> _MicroVM:
+    async def _spawn(self, instance: Instance, fsize: int) -> _MicroVM:
         argv = firecracker_argv(self._binary, instance.api_sock)
         console = instance.console_log.open("ab")
+        ruleset = self._ruleset_for(instance)
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=console,
                 stderr=asyncio.subprocess.STDOUT,
+                # The ruleset has to survive the fd-closing pass to still be
+                # there when `child_setup` restricts against it; the child
+                # closes it itself once it has.
+                pass_fds=() if ruleset is None else (ruleset,),
+                preexec_fn=confine.child_setup(ruleset, fsize),  # noqa: PLW1509
             )
         finally:
             # The child holds its own dup of the fd; ours is just the handle
             # we used to hand it over.
             console.close()
+            if ruleset is not None:
+                os.close(ruleset)
 
         vm = _MicroVM(instance, FirecrackerApi(instance.api_sock), process)
         try:
@@ -524,7 +591,9 @@ class FirecrackerBackend(Backend):
         vm: _MicroVM | None = None
         try:
             await loop.run_in_executor(None, _copy_rootfs, image, instance.rootfs)
-            vm = await self._spawn(instance)
+            vm = await self._spawn(
+                instance, self._fsize_for(instance, machine_config(room)["mem_size_mib"])
+            )
             await self._configure(vm, room)
             await vm.api.put("/actions", {"action_type": "InstanceStart"})
             attached = await self._attach(vm, width, height)
@@ -569,7 +638,10 @@ class FirecrackerBackend(Backend):
 
         vm: _MicroVM | None = None
         try:
-            vm = await self._spawn(instance)
+            # The memory file is already on disk at exactly guest RAM, which
+            # is the same ceiling the next `pause` will need.
+            mem_bytes = instance.mem_file.stat().st_size if instance.mem_file.exists() else 0
+            vm = await self._spawn(instance, self._fsize_for(instance, mem_bytes // (1024 * 1024)))
             # Must be the first call on this socket: loading a snapshot
             # restores the machine config, drives and vsock device wholesale,
             # and Firecracker rejects it once anything else has been set.
