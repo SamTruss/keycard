@@ -77,9 +77,9 @@ now; what's left is everything that makes one safe to hand to a stranger.
 - [x] Backend interface abstraction (designed from day one, now exercised by a second implementation)
 - [x] Rootfs image builds (`rootfs/`, with the guest agent in `guest-agent/`)
 - [x] Firecracker microVM provisioning, including `--keep` as a VM snapshot
-- [ ] Tap networking (the guest has no network at all today)
-- [ ] The jailer (firecracker currently runs unconfined)
-- [ ] Real isolation boundary (security claim deferred until the two above land)
+- [ ] The jailer (firecracker currently runs unconfined) — next
+- [ ] Real isolation boundary, claimed for rooms with no network, which is every microVM room today
+- [ ] Tap networking — deliberately deferred, not merely unstarted; both ways of building it cost more security than the feature is currently worth. Reasoning under Phase 3 in [FIRECRACKER.md](FIRECRACKER.md).
 
 ## Deliberately out of scope
 

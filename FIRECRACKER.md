@@ -3,9 +3,10 @@
 Status: **Phases 0, 1 and 2 done** (`guest-agent/`, `rootfs/`,
 `backends/firecracker.py`). Phase 2 has now booted real microVMs:
 `tests/test_firecracker_integration.py` runs green on a WSL2 host with
-`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phases 3–5 not started.
-This is the roadmap referenced by `SCOPE.md`'s v2 section, written down for
-the first time — previously only discussed, never committed.
+`/dev/kvm`, firecracker 1.16.1 and a 6.1 `vmlinux`. Phases 3–5 not started;
+the work order among them has changed to 4, 5, 3 — see the note above Phase
+3. This is the roadmap referenced by `SCOPE.md`'s v2 section, written down
+for the first time — previously only discussed, never committed.
 Nothing below is final; treat it as the current best guess, revised as work
 actually starts.
 
@@ -189,20 +190,62 @@ deliberately slow backend).
 only covered on a host that qualifies. A self-hosted runner is what would
 change that.
 
-### Phase 3 — Tap networking
+> **The order of the remaining phases changed after Phase 2 shipped.** The
+> numbers below are names, not a sequence. The work order is now 4, then 5,
+> then 3 — the jailer, then a security claim scoped to networkless rooms,
+> then networking if and when it earns its cost. Why is under Phase 3.
+
+### Phase 3 — Tap networking — **deferred, deliberately**
 
 Per-room tap device and IP, matching the isolation intent of today's
 `network = "none"` default. Keep the default identical to Docker rooms —
 no network unless a room opts in — don't let backend choice change a room's
 default posture.
 
-### Phase 4 — Resource limits parity
+Deferred behind Phases 4 and 5, on purpose. Both ways of building it spend
+real security to buy something no current use case needs, and a microVM
+with no NIC at all is a boundary that is both stronger and free:
 
-Map `RoomConfig`'s memory/cpus onto Firecracker's machine-config
-(`mem_size_mib`, vcpu count) and cgroups via the jailer. `pids_limit`
-doesn't map 1:1 — a microVM isn't sharing the host's process table with
-anything — so it needs its own decision: drop it for this backend, or
-reinterpret it as a limit the guest agent itself enforces.
+- **keycard creates taps and NAT rules itself.** Needs `CAP_NET_ADMIN`,
+  which is close to root-equivalent (rewrite netfilter, redirect routes,
+  promiscuous mode, `tc`/BPF). Worse, it cannot be dropped after startup
+  the way a privileged port bind can — rooms open on connect, so the
+  capability is live while unauthenticated SSH input is being parsed. It
+  also needs host-wide `ip_forward`, and it puts the privilege in the one
+  component the jailer does not confine. If this is ever built, it needs
+  privilege separation: a tiny helper forked *before* the listener starts,
+  whose whole vocabulary is create/delete tap, à la OpenSSH privsep or
+  `qemu-bridge-helper`.
+- **Operator pre-provisions a bridge and a pool of taps.** keycard stays
+  unprivileged, but the boundary moves into configuration keycard cannot
+  see or verify — the same `keycard.toml` is isolated or sitting on the
+  corporate LAN depending on someone else's bridge. A shared bridge also
+  puts every guest in one broadcast domain (guest-to-guest reachability,
+  ARP/MAC spoofing, IPv6 RA spoofing) and persistent taps carry state
+  across rooms, so "the room is gone" stops being true at the network
+  layer. Pool exhaustion becomes a hard concurrency ceiling.
+
+Note the inversion: the unprivileged option lands on the *weaker* topology,
+because per-room routed links need route manipulation, which needs the
+privilege that made the other option unattractive.
+
+Today `network = "none"` is an absolute guarantee — there is no NIC, so
+there is nothing to argue about. That is worth more than the feature.
+
+### Phase 4 — The jailer, and resource limits parity — **next**
+
+Run firecracker under the jailer: chroot, cgroups, seccomp, dropped
+privileges. `firecracker_argv()` is the seam it slots into. This was
+sequenced after networking originally; it is now the next piece of work,
+because it is what the security claim actually rests on and it needs no new
+privilege for keycard itself.
+
+Alongside it, map `RoomConfig`'s memory/cpus onto Firecracker's
+machine-config (`mem_size_mib`, vcpu count) and cgroups via the jailer.
+`pids_limit` doesn't map 1:1 — a microVM isn't sharing the host's process
+table with anything — so it needs its own decision: drop it for this
+backend, or reinterpret it as a limit the guest agent itself enforces.
+It is silently ignored today, and USAGE.md says so.
 
 ### Phase 5 — Update the security claim
 
@@ -212,6 +255,14 @@ Firecracker backend — kept distinct from the Docker backend's
 namespace/cgroup-only claim, not blurred into one blanket statement. This
 is the phase that actually delivers on "v2 adds a real isolation boundary";
 don't claim it earlier.
+
+The claim may be made **scoped to rooms with no network**, which is every
+Firecracker room today. That is not a weaker version of the promise — a
+guest with no NIC is the easiest boundary there is to defend, and "run
+something you don't fully trust" (see the `offline` room in
+`keycard.example.toml`) wants less network, not more. Scoping it this way
+means Phase 3 later spends a claim already held, rather than gambling one
+not yet earned.
 
 ## Questions this phase settled
 
@@ -255,6 +306,15 @@ That bet paid off only partly, and the shape of the miss is worth keeping.
 Every guess about the *wire format* was right and survived first contact.
 Both bugs the first boot found were about **lifecycle** — when a connection
 ends, and when a room starts — which is precisely what a stand-in transport
-and a fast backend hide. Phases 3–5 are now unblocked, but the lesson
+and a fast backend hide. The remaining phases are unblocked, but the lesson
 generalises to them: the timing-dependent parts of tap networking will not
 be provable without a booted VM either.
+
+The remaining order changed once Phase 2 was real. Networking was
+originally next because the plan treated it as part of reaching parity with
+the Docker backend. Looking at what it actually costs — a privileged
+keycard, or a boundary defined by configuration keycard cannot verify —
+against what it buys, the answer was to take the claim that is already
+sitting there unclaimed. A networkless microVM is the strongest thing this
+project has ever been able to say about isolation, and nothing had to be
+built to make it true.
