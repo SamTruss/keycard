@@ -19,7 +19,7 @@ ssh client                          keycard process
     |                                creates RoomSession (one per channel)
     |--- pty + shell request ----->       |
     |                                RoomSession opens a Room via a Backend
-    |                                     |  (a Docker container, today)
+    |                                     |  (a Docker container, or a microVM)
     |<==== raw pty bytes, both ways ======|
     |                                     |
     |--- disconnect / exit -------->  RoomSession tears the Room down
@@ -42,7 +42,16 @@ interactive only — see `RoomSession.exec_requested`).
 | `config.py` | `Config`/`RoomConfig` dataclasses, `keycard.toml` parsing, duration parsing (`"15m"` → seconds). |
 | `banner.py` | The ASCII banners written to the operator console and the SSH session. Pure string formatting. |
 | `backends/base.py` | The `Backend`/`Room`/`Kept` abstract interface — see below. |
-| `backends/docker.py` | The only implementation today: `DockerBackend`/`DockerRoom`/`DockerKept`. |
+| `backends/docker.py` | `DockerBackend`/`DockerRoom`/`DockerKept`. The default, and the only one that has shipped. |
+| `backends/firecracker.py` | `FirecrackerBackend`/`FirecrackerRoom`/`FirecrackerKept`: rooms as microVMs, `--keep` as a VM snapshot. Opt-in, still incomplete — see [FIRECRACKER.md](FIRECRACKER.md). |
+| `backends/vsock.py` | The vsock plumbing under that backend: the Firecracker `CONNECT`/`OK` handshake, and the two channels (pty data, control) the guest agent speaks over. |
+| `backends/fcapi.py` | Firecracker's REST-over-a-UNIX-socket control API, which is how a VM gets configured, booted, snapshotted and restored. |
+| `backends/routing.py` | `RoutingBackend`: itself a `Backend`, so that per-room backend selection stays invisible above the seam. |
+
+Two trees outside `src/` belong to the microVM backend: `guest-agent/` (the
+Rust pty agent that runs as PID 1 inside a room) and `rootfs/` (the script
+that turns a room's Docker image into a bootable ext4 filesystem with that
+agent installed).
 
 ## The backend seam
 
@@ -67,11 +76,19 @@ class Room(abc.ABC):
     async def pause(self) -> Kept: ...
 ```
 
-This exists for v2: a `FirecrackerBackend` implementing the same interface
-should be a drop-in for `DockerBackend`, with zero changes to `server.py`
-or `session.py`. It's also why `RoomSession` never imports anything from
-`backends.docker` — if you find yourself reaching for a Docker-specific
-type or exception outside `backends/docker.py`, that's the seam leaking.
+This seam existed before there was a second backend to justify it, and it
+held: `FirecrackerBackend` implements the same five-and-five methods and
+`server.py` never learned it exists. It's also why `RoomSession` never
+imports anything from `backends.docker` — if you find yourself reaching for
+a Docker-specific type or exception outside `backends/docker.py`, that's
+the seam leaking.
+
+`session.py` did change when the second backend arrived, but not to
+accommodate it: a microVM takes seconds to boot where a container takes
+about one, and that longer `open()` exposed a latent bug where input typed
+before the room existed was dropped on the floor. The fix (queue it, drain
+it once there's a pty) is backend-agnostic and was always the correct
+behaviour. A slow backend as a bug-finder is worth expecting again.
 
 `Room.destroy()` must be safe to call more than once — see "the many ways
 a room ends" below for why that's load-bearing, not defensive paranoia.
@@ -155,6 +172,9 @@ Two tiers, split by whether they need a real container runtime:
   ephemeral port against a real Docker daemon, then inspect what actually
   happened to the container. Auto-skip (`_docker_available()`) when no
   daemon is reachable, so `pytest` stays green on a machine without one.
+  `test_firecracker_integration.py` is the same idea one level down: it
+  boots actual microVMs, and skips unless `/dev/kvm`, a `firecracker`
+  binary, and a built rootfs are all present.
 
 CI mirrors that split: the `test` job (matrix across 3.11–3.13) runs
 everything except `test_integration.py`; a separate `integration` job
@@ -162,6 +182,14 @@ everything except `test_integration.py`; a separate `integration` job
 behaviour) runs only that file, with a session-scoped fixture that
 pre-pulls the test image so pull latency never eats into a test's own
 timing budget.
+
+GitHub's runners have no `/dev/kvm`, so the Firecracker file skips there
+and nothing in CI ever boots a VM. What CI does cover is the guest agent
+itself (`guest-agent/`, Rust), whose tests stand vsock in with TCP. That
+substitution is load-bearing and has already been wrong once: TCP
+propagates a half-close and Firecracker's vsock does not, so a bug that
+hung every room passed CI green. Treat a passing guest-agent suite as
+evidence about the agent's logic, not about the transport.
 
 ## Extending keycard
 
@@ -175,7 +203,11 @@ have it override the loaded `Config` before `serve()` is called (see how
 `--host`/`--port`/`--keep` do it), and update `man/keycard.1` — nothing
 regenerates that file, it's hand-maintained.
 
-**A new backend (v2):** implement `Backend`/`Room`/`Kept` from
-`backends/base.py`. Nothing in `server.py` or `session.py` should need to
-change; if it does, that's a sign the abstraction has a gap worth fixing
-first.
+**A new backend:** implement `Backend`/`Room`/`Kept` from
+`backends/base.py`, add a factory to `FACTORIES` in `backends/routing.py`
+(deferring the import inside it, so naming a backend is what pays for
+importing its stack), and add the name to `KNOWN_BACKENDS` in `config.py`.
+Nothing in `server.py` or `session.py` should need to change; if it does,
+that's a sign the abstraction has a gap worth fixing first.
+`backends/firecracker.py` is the worked example of doing this against
+something that isn't a container at all.

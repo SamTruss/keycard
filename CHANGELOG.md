@@ -8,6 +8,42 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Added
+
+- `FirecrackerBackend` (v2, `FIRECRACKER.md` Phase 2): rooms as microVMs, the
+  pty reached over vsock through the guest agent, and `--keep` implemented
+  as a Firecracker snapshot. Booted and verified against real microVMs on a
+  host with `/dev/kvm`; the integration tests skip anywhere without one, so
+  CI does not exercise it. Not the default and not finished — the microVM
+  still has no network and does not run under the jailer, so it is not yet
+  the isolation story `SECURITY.md` will eventually tell.
+- Backend selection: a `backend` key at the top level and per room, so a
+  deployment can mix the two. Rooms that don't name one use the default.
+- A `[firecracker]` config table (guest kernel, rootfs directory, runtime
+  directory, boot timeout), only read when something selects that backend.
+- The guest agent's TCP smoke test now runs in CI, covering the bridge end
+  to end against a real shell — including reconnecting to a session whose
+  host dropped, which is what `--keep` rests on.
+
+### Fixed
+
+- A room whose shell exited hung instead of ending. The guest agent
+  half-closed its side of the vsock connection and Firecracker relays that
+  to nothing, so the host's read never returned EOF and the session sat
+  there until something else timed it out. The agent now drops the
+  connection outright. Invisible to CI, which stands vsock in with TCP —
+  and TCP does propagate a half-close.
+- Input typed while a room was still opening was discarded rather than
+  queued, so the first command of a session could vanish. A container
+  opens fast enough that this almost never showed; a microVM boot is long
+  enough that it showed every time. A window resize during the same window
+  was dropped the same way, and now sets the size the room opens at.
+- The guest agent started its shell with `--login`, which `dash` rejects
+  outright — so any room whose image has no bash (a case `rootfs/build.sh`
+  supports deliberately) would have had its shell exit the instant it
+  started. Uses `-l`, which both shells accept. Found before the first
+  boot, so no release ever shipped it.
+
 ## [0.1.3] - 2026-08-07
 
 ### Fixed

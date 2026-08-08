@@ -106,6 +106,26 @@ Per-room knobs, all optional:
 | `cpus` | CPU limit as a core count, e.g. `2`. Default uncapped. |
 | `pids_limit` | Max processes/threads in the container. Default `512`. |
 | `network` | `"none"` disables outbound networking entirely. |
+| `backend` | `"docker"` (default) or `"firecracker"`. See below before reaching for the second one. |
+
+### Rooms on microVMs
+
+There is a second backend that opens each room as a Firecracker microVM
+instead of a container, selected with `backend = "firecracker"` either at
+the top level or per room. It works — rooms boot, shells run, `--keep`
+becomes a VM snapshot — but it is not finished and it is not the default:
+
+- The guest has **no network at all**. Not "isolated networking" — none.
+- firecracker runs unconfined; the jailer isn't wired up yet.
+- It needs a host with `/dev/kvm`, a guest kernel, and a rootfs built by
+  `rootfs/build.sh`.
+- `pids_limit` has no meaning for a microVM and is ignored there.
+
+So it isn't yet the stronger isolation boundary it's eventually meant to
+be — pick it to try the thing, not to rely on it. Setup and current status
+are in [FIRECRACKER.md](FIRECRACKER.md); the config knobs are the
+`[firecracker]` table in
+[keycard.example.toml](keycard.example.toml).
 
 ## Command reference
 

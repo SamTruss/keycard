@@ -30,6 +30,13 @@ IDLE_EXIT_STATUS = 124
 # session cut short by a server shutdown is, in effect, exactly that.
 SHUTDOWN_EXIT_STATUS = 143
 
+# How many chunks of type-ahead to hold while the room is still opening.
+# There is a real window here — a container takes about a second to start and
+# a microVM several, and anything typed in it arrives before there is a pty
+# to type it into. Bounded because the far end is a network peer: past this
+# many unread chunks the session is not type-ahead any more, it is a flood.
+INPUT_BACKLOG = 512
+
 
 class ActiveSessions:
     """Live sessions a shutdown drain can wait on without polling a set."""
@@ -130,7 +137,12 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         self._chan: asyncssh.SSHServerChannel[bytes] | None = None
         self._room: Room | None = None
         self._pump: asyncio.Task[None] | None = None
+        self._feeder: asyncio.Task[None] | None = None
         self._watchdog: asyncio.Task[None] | None = None
+        # Input is queued rather than written straight through: until `open()`
+        # returns there is no room to write to, and the first thing a client
+        # sends usually arrives during exactly that window.
+        self._input: asyncio.Queue[bytes] = asyncio.Queue(INPUT_BACKLOG)
         self._size = (80, 24)
         self._last_activity = time.monotonic()
 
@@ -160,13 +172,22 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         self._watchdog = asyncio.create_task(self._idle_watchdog())
 
     def terminal_size_changed(self, width: int, height: int, pixwidth: int, pixheight: int) -> None:
+        # Recorded as well as forwarded: a resize that lands while the room is
+        # still opening has nothing to forward to, and `open()` is about to be
+        # told what size to use.
+        self._size = (width or self._size[0], height or self._size[1])
         if self._room is not None:
             asyncio.create_task(self._room.resize(width, height))  # noqa: RUF006
 
     def data_received(self, data: bytes, datatype: int | None) -> None:
         self._last_activity = time.monotonic()
-        if self._room is not None:
-            asyncio.create_task(self._room.write(data))  # noqa: RUF006
+        try:
+            self._input.put_nowait(data)
+        except asyncio.QueueFull:
+            # Nothing has drained this in `INPUT_BACKLOG` chunks, so the room
+            # is wedged or the peer is flooding. Dropping the newest keeps
+            # what was typed first, which is the half more likely to matter.
+            log.warning("input backlog full; dropped %d bytes", len(data))
 
     def eof_received(self) -> bool:
         return False
@@ -177,6 +198,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         # live, so either destroy it or (with --keep) pause it for reconnect.
         if self._pump is not None:
             self._pump.cancel()
+        self._stop_feeder()
         if self._watchdog is not None:
             self._watchdog.cancel()
         if self._room is not None:
@@ -237,6 +259,9 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         else:
             chan.write(banner.accepted(self._room_cfg.name, self._room_cfg.image))
         room = self._room
+        # Only now is there something to write to, so this is where the
+        # type-ahead collected during `open()` finally goes.
+        self._feeder = asyncio.create_task(self._feed(room))
         try:
             while True:
                 data = await room.read()
@@ -249,12 +274,30 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         except Exception:
             log.exception("room stream failed")
         finally:
+            self._stop_feeder()
             if self._room is not None:
                 status = await self._checkout(room)
                 self._room = None
                 if not chan.is_closing():
                     chan.write(banner.destroyed("checked out"))
                     chan.exit(status)
+
+    async def _feed(self, room: Room) -> None:
+        """Queued client input into the room, in order.
+
+        A single task rather than a write per `data_received` callback: two
+        chunks written as two independent tasks can reach the pty in the
+        wrong order, and a keystroke that arrives out of order is worse than
+        one that arrives late.
+        """
+        while True:
+            data = await self._input.get()
+            await room.write(data)
+
+    def _stop_feeder(self) -> None:
+        if self._feeder is not None:
+            self._feeder.cancel()
+            self._feeder = None
 
     async def _checkout(self, room: Room) -> int:
         try:

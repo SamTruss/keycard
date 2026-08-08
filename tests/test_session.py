@@ -90,9 +90,27 @@ class FakeChannel:
         self._closing = True
 
 
+class SlowBackend(FakeBackend):
+    """A backend whose `open()` takes long enough for a client to type into.
+
+    Not an artificial delay: a Firecracker room really is a kernel boot away,
+    and that is the window this exists to reproduce.
+    """
+
+    def __init__(self, room: FakeRoom, delay: float) -> None:
+        super().__init__(room)
+        self._delay = delay
+        self.opened_size: tuple[int, int] | None = None
+
+    async def open(self, room: RoomConfig, width: int, height: int) -> Room:
+        self.opened_size = (width, height)
+        await asyncio.sleep(self._delay)
+        return await super().open(room, width, height)
+
+
 async def _teardown(session: RoomSession) -> None:
     """Cancel background tasks so a test doesn't leak them past its scope."""
-    tasks = [t for t in (session._pump, session._watchdog) if t is not None]
+    tasks = [t for t in (session._pump, session._feeder, session._watchdog) if t is not None]
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -175,6 +193,54 @@ async def test_room_output_also_counts_as_activity() -> None:
 
     await asyncio.sleep(0.3)
     assert room.destroy_count == 1
+
+    await _teardown(session)
+
+
+@pytest.mark.timeout(5)
+async def test_input_typed_while_the_room_opens_is_not_lost() -> None:
+    """Type-ahead has to survive `open()`.
+
+    The first thing a client sends arrives while the room is still being
+    created, and writing it straight to `self._room` dropped it on the floor
+    because there was no room yet. A Docker room opens fast enough to hide
+    that; a microVM boot does not, and the command the user typed simply
+    never ran.
+    """
+    room = FakeRoom()
+    chan = FakeChannel()
+    backend = SlowBackend(room, delay=0.2)
+    session = RoomSession(backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"))
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+
+    # Typed before open() has returned — there is no room to write to yet.
+    session.data_received(b"echo one\n", None)
+    session.data_received(b"echo two\n", None)
+    assert room.writes == []
+
+    await asyncio.sleep(0.4)
+
+    # Delivered once there was somewhere to deliver them, and in order.
+    assert room.writes == [b"echo one\n", b"echo two\n"]
+
+    await _teardown(session)
+
+
+@pytest.mark.timeout(5)
+async def test_a_resize_during_open_sets_the_size_the_room_opens_at() -> None:
+    """Same window, same problem: a resize with no room to forward it to."""
+    room = FakeRoom()
+    chan = FakeChannel()
+    backend = SlowBackend(room, delay=0.2)
+    session = RoomSession(backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"))
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.terminal_size_changed(120, 40, 0, 0)
+    session.session_started()
+
+    await asyncio.sleep(0.4)
+
+    assert backend.opened_size == (120, 40)
 
     await _teardown(session)
 

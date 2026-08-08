@@ -27,7 +27,7 @@ Containers share a kernel with the host. Container escape is a known and recurri
 
 ### v2 (Firecracker) — intended as a real boundary
 
-Once the microVM backend lands, escape from a guest becomes in scope. That claim is not being made until then.
+The microVM backend now boots rooms, but escape from a guest is **not yet in scope** and the backend is not the default. Two things have to land before that claim is made: the guest has no network at all today, so nothing about network isolation has been tested, and firecracker runs unconfined rather than under the jailer. Until both are done, treat `backend = "firecracker"` as exactly as trustworthy as v1 — see [FIRECRACKER.md](FIRECRACKER.md) for what is and isn't verified.
 
 ## Reporting a vulnerability
 

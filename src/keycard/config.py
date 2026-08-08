@@ -7,6 +7,7 @@ defaults.  The file is optional — keycard must work with zero configuration.
 from __future__ import annotations
 
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +15,14 @@ log = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".config" / "keycard"
 DEFAULT_CONFIG = CONFIG_DIR / "keycard.toml"
+
+# Which implementations `backend = "..."` may name, at the top level or on a
+# room. Kept here rather than in backends/ because config is loaded long
+# before any backend is constructed, and importing a backend to validate a
+# string would drag its dependencies in on every `keycard rooms`.
+# `tests/test_routing.py` asserts this stays in step with the real registry.
+KNOWN_BACKENDS = frozenset({"docker", "firecracker"})
+DEFAULT_BACKEND = "docker"
 
 # Ships out of the box so ``ssh ubuntu@host`` works without a config file.
 BUILTIN_ROOMS: dict[str, dict[str, object]] = {
@@ -49,6 +58,46 @@ class RoomConfig:
     cpus: int = 0
     pids_limit: int = 512
     network: str = ""  # "" means default docker bridge; "none" disables
+    backend: str = ""  # "" means the server-level default
+    rootfs: str = ""  # firecracker only; "" derives it from the room name
+
+
+# The cmdline `rootfs/build.sh` says its images expect, and the only one that
+# matches `rootfs/init.sh` — `init=` has to name keycard-init, and the agent
+# writes the guest console to ttyS0. Overridable per deployment, but changing
+# it without changing the rootfs is how you get a microVM that boots to
+# nothing.
+DEFAULT_BOOT_ARGS = "init=/usr/sbin/keycard-init console=ttyS0 reboot=k panic=1 pci=off"
+
+
+@dataclass
+class FirecrackerConfig:
+    """The ``[firecracker]`` table.
+
+    Only read when something actually selects the firecracker backend, so a
+    Docker-only deployment never has to supply any of it — see
+    ``backends/routing.py``, which constructs backends lazily.
+    """
+
+    binary: str = "firecracker"
+    # No default worth guessing: a guest kernel is a file the operator builds
+    # or downloads, and silently booting the wrong one is worse than refusing
+    # to start. None means "not configured".
+    kernel: Path | None = None
+    rootfs_dir: Path = Path("/var/lib/keycard/rootfs")
+    # Per-microVM scratch: API socket, vsock socket, the room's rootfs copy,
+    # and any snapshot. Deliberately not under rootfs_dir — that one holds
+    # the shared built images and is never written to at runtime.
+    runtime_dir: Path = Path(tempfile.gettempdir()) / "keycard"
+    boot_args: str = DEFAULT_BOOT_ARGS
+    boot_timeout: str = "30s"
+
+    @property
+    def boot_timeout_seconds(self) -> float:
+        """How long to wait for the guest agent to answer after
+        InstanceStart. Covers kernel boot plus the rootfs init, so it is
+        generous by design — a slow first boot is not a failed one."""
+        return parse_duration(self.boot_timeout)
 
 
 @dataclass
@@ -62,7 +111,9 @@ class Config:
     shutdown_grace: str = "30s"
     keep_window: str = "0"
     default_room: str = DEFAULT_ROOM
+    backend: str = DEFAULT_BACKEND
     rooms: dict[str, RoomConfig] = field(default_factory=dict)
+    firecracker: FirecrackerConfig = field(default_factory=FirecrackerConfig)
 
     @property
     def port(self) -> int:
@@ -100,6 +151,25 @@ class Config:
         return self.rooms.get(username) or self.rooms.get(self.default_room)
 
 
+def _valid_backend(name: str, where: str) -> str:
+    """Reject an unknown ``backend =`` at load time, not on first connection.
+
+    Falls back rather than raising, matching how an unresolvable
+    ``default_room`` is handled: a typo in one key shouldn't stop the server
+    starting, but it must be loud.
+    """
+    if not name or name in KNOWN_BACKENDS:
+        return name
+    log.warning(
+        "unknown backend %r in %s (known: %s); using %s",
+        name,
+        where,
+        ", ".join(sorted(KNOWN_BACKENDS)),
+        DEFAULT_BACKEND,
+    )
+    return DEFAULT_BACKEND
+
+
 def _parse_rooms(raw: dict[str, object]) -> dict[str, RoomConfig]:
     rooms: dict[str, RoomConfig] = {}
     rooms_table = raw.get("rooms", {})
@@ -119,8 +189,31 @@ def _parse_rooms(raw: dict[str, object]) -> dict[str, RoomConfig]:
             cpus=int(val.get("cpus", 0)),
             pids_limit=int(val.get("pids_limit", 512)),
             network=str(val.get("network", "")),
+            backend=_valid_backend(str(val.get("backend", "")), f"room {name}"),
+            rootfs=str(val.get("rootfs", "")),
         )
     return rooms
+
+
+def _parse_firecracker(raw: dict[str, object]) -> FirecrackerConfig:
+    fc = FirecrackerConfig()
+    table = raw.get("firecracker", {})
+    if not isinstance(table, dict):
+        return fc
+
+    if "binary" in table:
+        fc.binary = str(table["binary"])
+    if "kernel" in table:
+        fc.kernel = Path(str(table["kernel"])).expanduser()
+    if "rootfs_dir" in table:
+        fc.rootfs_dir = Path(str(table["rootfs_dir"])).expanduser()
+    if "runtime_dir" in table:
+        fc.runtime_dir = Path(str(table["runtime_dir"])).expanduser()
+    if "boot_args" in table:
+        fc.boot_args = str(table["boot_args"])
+    if "boot_timeout" in table:
+        fc.boot_timeout = str(table["boot_timeout"])
+    return fc
 
 
 def _builtin_rooms() -> dict[str, RoomConfig]:
@@ -167,7 +260,10 @@ def load(path: Path | None = None) -> Config:
         cfg.keep_window = str(raw["keep_window"])
     if "default_room" in raw:
         cfg.default_room = str(raw["default_room"])
+    if "backend" in raw:
+        cfg.backend = _valid_backend(str(raw["backend"]), "the top level") or DEFAULT_BACKEND
 
+    cfg.firecracker = _parse_firecracker(raw)
     cfg.rooms = _parse_rooms(raw)
 
     if not cfg.rooms:
