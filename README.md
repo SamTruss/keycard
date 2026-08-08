@@ -12,7 +12,7 @@
 [![status](https://img.shields.io/badge/status-alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
 [![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/LICENSE)
 [![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/pyproject.toml)
-[![backend](https://img.shields.io/badge/docker%20%7C%20podman-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/USAGE.md#configuring-rooms)
+[![backend](https://img.shields.io/badge/docker%20%7C%20podman%20%7C%20firecracker-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/USAGE.md#configuring-rooms)
 
 <br>
 

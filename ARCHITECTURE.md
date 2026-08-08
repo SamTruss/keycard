@@ -161,36 +161,40 @@ rather than silently at whatever moment the reaper eventually fires.
 
 ## Testing strategy
 
-Two tiers, split by whether they need a real container runtime:
+Three tiers, split by what each one needs from the host:
 
-- **Unit tests** (`test_session.py`, `test_config.py`, `test_server.py`,
-  `test_banner.py`, `test_docker.py`) run against fakes — `FakeRoom`,
-  `FakeBackend`, `FakeChannel` in `test_session.py` implement the same
-  `Room`/`Backend` ABCs the real Docker backend does, so `RoomSession`
-  itself is exercised without Docker. Fast, deterministic, no daemon
-  required.
-- **Integration tests** (`test_integration.py`) drive a real server on an
-  ephemeral port against a real Docker daemon, then inspect what actually
-  happened to the container. Auto-skip (`_docker_available()`) when no
-  daemon is reachable, so `pytest` stays green on a machine without one.
-  `test_firecracker_integration.py` is the same idea one level down: it
-  boots actual microVMs, and skips unless `/dev/kvm`, a `firecracker`
-  binary, and a built rootfs are all present.
+- **Unit tests** — everything except the two `*_integration.py` files. Most
+  run against fakes: `FakeRoom`, `FakeBackend` and `FakeChannel` in
+  `test_session.py` implement the same `Room`/`Backend` ABCs the real
+  backends do, so `RoomSession` is exercised without Docker. The Firecracker
+  side is split so that its decisions (`test_firecracker.py`,
+  `test_fcapi.py`, `test_vsock.py`, `test_routing.py`) can be held to
+  account on a machine with no `/dev/kvm`. Fast, deterministic, no daemon.
+- **Docker integration** (`test_integration.py`) drives a real server on an
+  ephemeral port against a real Docker daemon, then inspects what actually
+  happened to the container. Auto-skips (`_docker_available()`) when no
+  daemon is reachable.
+- **Firecracker integration** (`test_firecracker_integration.py`) boots
+  actual microVMs, and skips unless `/dev/kvm`, a `firecracker` binary and a
+  built rootfs are all present. It names the first missing prerequisite
+  rather than skipping silently, because a backend that quietly stops being
+  tested is worse than one that visibly can't be.
 
 CI mirrors that split: the `test` job (matrix across 3.11–3.13) runs
 everything except `test_integration.py`; a separate `integration` job
 (single Python version — this isn't testing Python-version-specific
-behaviour) runs only that file, with a session-scoped fixture that
-pre-pulls the test image so pull latency never eats into a test's own
-timing budget.
+behaviour) runs only that file, with a session-scoped fixture that pre-pulls
+the test image so pull latency never eats into a test's own timing budget.
 
-GitHub's runners have no `/dev/kvm`, so the Firecracker file skips there
-and nothing in CI ever boots a VM. What CI does cover is the guest agent
-itself (`guest-agent/`, Rust), whose tests stand vsock in with TCP. That
-substitution is load-bearing and has already been wrong once: TCP
-propagates a half-close and Firecracker's vsock does not, so a bug that
-hung every room passed CI green. Treat a passing guest-agent suite as
-evidence about the agent's logic, not about the transport.
+GitHub's runners have no `/dev/kvm`, so **CI never boots a VM**. Two things
+partly cover that gap. The guest agent (`guest-agent/`, Rust) is tested
+against a real shell with TCP standing in for vsock — a substitution that is
+load-bearing and has already been wrong once: TCP propagates a half-close
+and Firecracker's vsock does not, so a bug that hung every room passed CI
+green. Treat a passing guest-agent suite as evidence about the agent's
+logic, not about the transport. The confinement (`test_confine.py`) is the
+happier case: Landlock needs no virtualization, so those tests really do run
+on the runners, and they test by denial rather than by success.
 
 ## Extending keycard
 

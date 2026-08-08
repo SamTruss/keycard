@@ -13,6 +13,11 @@ expose this anywhere, see [SECURITY.md](SECURITY.md).
 - An SSH key pair on the machine you'll connect *from* (`ssh-keygen -t
   ed25519` if you don't have one)
 
+Rooms can also be opened as microVMs instead of containers, which needs
+`/dev/kvm` and a built rootfs rather than a daemon — see
+[Rooms on microVMs](#rooms-on-microvms) below. Containers are the default
+and nothing here requires you to care.
+
 ## Install
 
 ```bash

@@ -42,6 +42,13 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
   against a booted VM rather than stated. Two caveats are documented rather
   than fixed, because both are real: a `--keep` snapshot writes guest RAM
   to disk unencrypted, and both backends share one SSH front door.
+- `SECURITY.md` gained an "out of scope on any backend" section, so the
+  exclusions that never depended on which backend you chose are stated once
+  instead of buried in the Docker one. It says plainly that reports which
+  depend on keycard having been run as root, under `sudo`, as an
+  Administrator, or with added capabilities **will not be investigated** —
+  nothing in keycard needs privilege, and every other guarantee on that
+  page assumes it doesn't have any.
 
 ### Fixed
 
