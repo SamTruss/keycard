@@ -142,7 +142,7 @@ cara@host  → rm 3 · isolated
 
 **`RM 105`** &nbsp;·&nbsp; Under renovation
 
-v1 runs on containers, which is enough to keep your machine clean. Real isolation needs Firecracker microVMs, and that's what v2 is for. Rooms boot as microVMs today, behind an opt-in `backend = "firecracker"` — but they have no network and don't run under the jailer yet, so the isolation claim still isn't being made. See the [roadmap](#roadmap).
+v1 runs on containers, which is enough to keep your machine clean. Real isolation needs Firecracker microVMs, and that's what v2 is for. Rooms boot as microVMs today behind an opt-in `backend = "firecracker"`, with their own kernel and no network device at all — and for those rooms, guest escape is in scope. What's still missing is networking, which is [deliberately deferred](https://github.com/SamTruss/keycard/blob/main/FIRECRACKER.md). See the [roadmap](#roadmap).
 
 ---
 
@@ -258,6 +258,8 @@ Containers share a kernel with the host, and escapes are a real, recurring class
 
 Shipping today: public-key auth only, no Docker socket passthrough, no host mounts, dropped capabilities, optional per-room network isolation. Full threat model in [SECURITY.md](https://github.com/SamTruss/keycard/blob/main/SECURITY.md).
 
+**The microVM backend is the answer to that box.** `backend = "firecracker"` gives a room its own kernel behind KVM with no network device attached, and for those rooms guest escape *is* in scope — a real boundary rather than hygiene. It's opt-in, needs `/dev/kvm` and a built rootfs, and comes with caveats worth reading before you lean on it.
+
 ---
 
 ## Roadmap
@@ -278,7 +280,8 @@ Shipping today: public-key auth only, no Docker socket passthrough, no host moun
 
 - [x] Backend abstraction
 - [x] Rootfs builds, guest agent, microVM provisioning
-- [ ] Tap networking, jailer, the isolation claim
+- [x] VMM confinement, and the isolation claim for rooms with no network
+- [ ] Tap networking (deliberately deferred — see FIRECRACKER.md)
 
 **Deliberately not building:** port forwarding, SFTP, persistent volumes, multi-user accounts, web UI. Each is defensible alone; together they'd make keycard a platform, and platforms need configuring.
 

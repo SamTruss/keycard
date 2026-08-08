@@ -131,8 +131,11 @@ any other room's disk image. Set `confinement = "required"` under
 confinement = "required"
 ```
 
-So it isn't yet the stronger isolation boundary it's eventually meant to
-be — pick it to try the thing, not to rely on it. Setup and current status
+For rooms like these — their own kernel, no network device — **guest escape
+is in scope**, which is the boundary v1 never claimed. Two caveats before
+you lean on it: a `--keep` snapshot writes the guest's RAM to disk in the
+clear, and both backends sit behind the same SSH front door. Read
+[SECURITY.md](SECURITY.md) for the full statement. Setup and current status
 are in [FIRECRACKER.md](FIRECRACKER.md); the config knobs are the
 `[firecracker]` table in
 [keycard.example.toml](keycard.example.toml).

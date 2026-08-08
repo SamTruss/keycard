@@ -108,6 +108,31 @@ def test_instance_puts_everything_a_room_owns_in_one_directory(tmp_path: Path) -
     assert instance.dir.is_dir()
 
 
+def test_an_instance_directory_is_not_readable_by_other_users(tmp_path: Path) -> None:
+    """What lands in here is the room's disk image and, once `pause` has
+    run, a plaintext dump of its RAM. The default runtime_dir is under /tmp,
+    so the usual 0755 would hand both to every local user on the host."""
+    instance = fc.Instance.create(tmp_path, "ubuntu")
+    assert instance.dir.stat().st_mode & 0o077 == 0
+
+
+def test_a_pre_existing_runtime_dir_is_tightened_not_trusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It lives under /tmp by default, so it may already exist — created
+    0755 by an older release, or by whoever got there first."""
+    runtime = tmp_path / "run"
+    runtime.mkdir(mode=0o755)
+    kernel = tmp_path / "vmlinux"
+    kernel.write_bytes(b"x")
+    monkeypatch.setattr(fc.shutil, "which", lambda _: "/usr/bin/firecracker")
+    monkeypatch.setattr(fc, "kvm_present", lambda: True)
+    fc.FirecrackerBackend(
+        FirecrackerConfig(kernel=kernel, rootfs_dir=tmp_path, runtime_dir=runtime)
+    )
+    assert runtime.stat().st_mode & 0o077 == 0
+
+
 def test_instance_ids_are_unique_and_name_their_room(tmp_path: Path) -> None:
     first = fc.Instance.create(tmp_path, "python")
     second = fc.Instance.create(tmp_path, "python")

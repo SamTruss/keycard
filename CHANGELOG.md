@@ -32,8 +32,26 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
   `[firecracker] confinement`, which also takes `required` for deployments
   that would rather not start than run unconfined.
 
+### Changed
+
+- **`SECURITY.md` now claims a real isolation boundary for microVM rooms.**
+  Guest escape is in scope for rooms opened under `backend = "firecracker"`
+  — the first time keycard has claimed anything of the sort, and the thing
+  v2 existed to deliver. The claim is scoped to rooms with no network,
+  which is every microVM room, and each condition it rests on is asserted
+  against a booted VM rather than stated. Two caveats are documented rather
+  than fixed, because both are real: a `--keep` snapshot writes guest RAM
+  to disk unencrypted, and both backends share one SSH front door.
+
 ### Fixed
 
+- Instance directories were created world-readable (`0755`) under a default
+  runtime directory of `/tmp/keycard`, so any local user on the host could
+  read a room's whole disk image — and, once `--keep` had paused it, a
+  plaintext dump of its RAM. They are now `0700`, and an existing runtime
+  directory is tightened rather than trusted. Only reachable by someone
+  with a local account on the host, and only for the Firecracker backend,
+  which has never been in a release.
 - A room whose shell exited hung instead of ending. The guest agent
   half-closed its side of the vsock connection and Firecracker relays that
   to nothing, so the host's read never returned EOF and the session sat

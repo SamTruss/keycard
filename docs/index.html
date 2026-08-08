@@ -437,8 +437,8 @@ footer{border-top:1px solid var(--line);padding:30px 0 46px}
       <p>
         v1 runs on containers, which is enough to keep your machine clean. Real
         isolation needs Firecracker, and that's what v2 is for. Rooms boot as
-        microVMs today, but they have no network and no jailer yet — so the
-        isolation claim stays unmade, and this page won't pretend otherwise.
+        microVMs today — own kernel, no network device — and for those rooms
+        guest escape is in scope. Networking is deliberately still missing.
         <a href="https://github.com/SamTruss/keycard#roadmap" style="color:var(--brass)">The roadmap is public</a>.
       </p>
     </article>
@@ -469,6 +469,13 @@ footer{border-top:1px solid var(--line);padding:30px 0 46px}
       no host mounts, dropped capabilities, optional per-room network isolation.
       The full threat model is in
       <a href="https://github.com/SamTruss/keycard/blob/main/SECURITY.md" style="color:var(--brass)">SECURITY.md</a>.
+    </p>
+    <p>
+      <b>The microVM backend is the answer to that box.</b>
+      <code>backend = "firecracker"</code> gives a room its own kernel behind KVM
+      with no network device attached, and for those rooms guest escape
+      <i>is</i> in scope — a real boundary rather than hygiene. Opt-in, needs
+      /dev/kvm, and comes with caveats worth reading first.
     </p>
   </div>
 </section>
