@@ -247,3 +247,91 @@ image = "ubuntu:24.04"
     cfg = load(toml)
     assert "broken" not in cfg.rooms
     assert "valid" in cfg.rooms
+
+
+# -- keys a backend will not honour ------------------------------------------
+
+
+def test_pids_limit_on_a_firecracker_room_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ignoring the key is right; ignoring it in silence is not.
+
+    An operator who writes a limit and reads it back in their own config has
+    every reason to think it is in force.
+    """
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[rooms.vm]
+image = "ubuntu:24.04"
+backend = "firecracker"
+pids_limit = 256
+""",
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+
+    assert "pids_limit" in caplog.text
+    assert "vm" in caplog.text
+    # Loud, but not fatal: the room still loads and the server still starts.
+    assert cfg.rooms["vm"].pids_limit == 256
+
+
+def test_pids_limit_warns_when_the_backend_is_only_set_at_the_top_level(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A room inherits the top-level backend, so that is where its keys have
+    to be judged — reading only `[rooms.*]` would miss this entirely."""
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+backend = "firecracker"
+
+[rooms.vm]
+image = "ubuntu:24.04"
+pids_limit = 256
+""",
+        encoding="utf-8",
+    )
+    load(toml)
+
+    assert "pids_limit" in caplog.text
+
+
+def test_pids_limit_on_a_docker_room_is_silent(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Docker honours it, so there is nothing to warn about."""
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[rooms.box]
+image = "ubuntu:24.04"
+pids_limit = 256
+""",
+        encoding="utf-8",
+    )
+    cfg = load(toml)
+
+    assert "pids_limit" not in caplog.text
+    assert cfg.rooms["box"].pids_limit == 256
+
+
+def test_a_firecracker_room_that_never_mentions_pids_limit_is_silent(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every room carries the dataclass default, so warning on the value
+    rather than on the key would fire for configs that never set it."""
+    toml = tmp_path / "keycard.toml"
+    toml.write_text(
+        """
+[rooms.vm]
+image = "ubuntu:24.04"
+backend = "firecracker"
+""",
+        encoding="utf-8",
+    )
+    load(toml)
+
+    assert "pids_limit" not in caplog.text

@@ -274,9 +274,11 @@ Two things Landlock does not cover, both deliberate:
   the VMM in a supervisor complicates every signal path in `_stop`. Guest
   RAM is already capped by `mem_size_mib`, so what is uncovered is VMM
   overhead, not guest allocation.
-- **`pids_limit`.** Still has no meaning for a microVM, still ignored, still
-  needs its own decision: drop it for this backend, or have the guest agent
-  enforce it. USAGE.md says it is ignored.
+- **`pids_limit`.** Still has no meaning for a microVM and is still ignored,
+  but no longer in silence: `config.py` warns at load when a firecracker room
+  sets it, naming the room. The decision it was waiting on went to "say so"
+  rather than "enforce it" — see Still open below for why enforcement was not
+  worth its cost.
 
 ### Phase 5 — Update the security claim — **done**
 
@@ -332,9 +334,18 @@ compromise regardless of backend.
 
 ## Still open
 
-- **`pids_limit` for a microVM** (Phase 4). It doesn't map: a guest isn't
-  sharing the host's process table with anything. Drop it for this backend,
-  or reinterpret it as something the guest agent enforces.
+- ~~**`pids_limit` for a microVM**~~ — **decided.** It doesn't map: a guest
+  isn't sharing the host's process table with anything, so there is no
+  host-side count to cap. The two candidates were to have the guest agent
+  enforce it, or to keep ignoring it and say so. Enforcement lost: it would
+  mean a guest-side `RLIMIT_NPROC` or cgroup, a rootfs rebuild and new
+  integration tests, to bound something that cannot reach the host in the
+  first place — a fork bomb in the guest costs that guest its own room, and
+  nothing else. The ceilings that actually matter are `memory` and `cpus`,
+  which Firecracker applies to the VM. So the key stays ignored, and
+  `config.py` now warns at load when a firecracker room sets it. That turns
+  a documented gap into a loud one, which is the honest version of the same
+  behaviour.
 - **Trailing pty output on exit.** The agent gives the pty a 50ms drain
   before closing the data channel, which is a mitigation, not a fix. The
   proper answer is to read the pty to EOF, which risks hanging on an orphan
