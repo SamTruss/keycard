@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "keycard-ssh"
-version = "0.2.4"
+version = "1.0.0"
 description = "Disposable SSH sandboxes. One command, zero setup."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Sam Truss" }]
 keywords = ["ssh", "sandbox", "ephemeral", "container", "docker", "devtools"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
