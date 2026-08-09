@@ -66,8 +66,13 @@ To cut a release:
 1. In `CHANGELOG.md`, retitle `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`
    and add a fresh empty `## [Unreleased]` above it.
 2. Bump `version` in `pyproject.toml` and `__version__` in
-   `src/keycard/__init__.py` to match.
-3. Commit those two changes, then tag and push:
+   `src/keycard/__init__.py` to match, then run `pytest
+   tests/test_version_strings.py` and fix whatever it names. The version is
+   also written into `README.md`, `man/keycard.1` and both pages under
+   `docs/`, and those used to be missed every time — the workflow only ever
+   checked the first two. The test fails rather than trusting this list to
+   stay complete.
+3. Commit those changes, then tag and push:
    ```bash
    git tag vX.Y.Z
    git push origin vX.Y.Z
