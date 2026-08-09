@@ -8,6 +8,8 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-09
+
 ### Fixed
 
 - **A room could be left running by a shutdown that raced its own teardown.**
