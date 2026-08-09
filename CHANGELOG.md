@@ -10,48 +10,67 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [1.0.0] - 2026-08-09
 
-The configuration file, the CLI and the SSH-facing behaviour are now stable
-and will not break on a minor release. What is and is not covered by that is
-written out in [CONTRIBUTING.md](CONTRIBUTING.md#what-10-promises) — notably,
-`import keycard` is *not* a supported library interface.
+keycard has been installable since 0.1.1 and has shipped nine releases since.
+This one doesn't add a feature. It makes a promise.
 
-1.0 is a compatibility promise, not a claim that the work is finished. The
-microVM backend stays opt-in and its networking stays
-[deliberately deferred](FIRECRACKER.md).
+From here, the config file you wrote, the commands you typed, and the way
+`ssh python@yourhost` behaves are **stable** — they will not break on a minor
+release. If any of them ever has to change, that's a 2.0, and you'll see it
+coming.
+
+Covered: every key in [keycard.example.toml](keycard.example.toml), including
+the `[firecracker]` table; `keycard up` and `keycard rooms` with their flags
+and the two reserved exit statuses (`124` idle-reaped, `143` shutdown); and
+the SSH-facing behaviour — username picks the room, public keys only, `exec`
+refused, one channel per connection, room destroyed when the connection ends.
+
+Not covered, so the promise keeps its value: `import keycard` is **not** a
+library interface, log lines are for humans rather than parsers, and the
+security claims live in [SECURITY.md](SECURITY.md) rather than in semver —
+narrowing one is a correction, not a breaking change. The full statement is
+in [CONTRIBUTING.md](CONTRIBUTING.md#what-10-promises).
+
+1.0 means you can build on this without watching for the ground to move. It
+does not mean the work is finished: tap networking for microVMs is still
+[deliberately deferred](FIRECRACKER.md), and the Homebrew formula is still
+outstanding.
 
 ### Changed
 
-- **`Development Status` is now `5 - Production/Stable`.** It had been
-  `2 - Pre-Alpha` since the first release, which was already two steps behind
-  what the README claimed by 0.2.4.
+- **`--keep` no longer works on firecracker rooms.** They are destroyed on
+  disconnect whatever `keep_window` says. Docker rooms are unaffected.
 
-- **`--keep` is now refused on the firecracker backend.** Pausing a microVM
-  means snapshotting it, and a Firecracker snapshot dumps the whole of guest
-  RAM — keys, tokens, whatever was on screen — to a file the VMM later
-  restores by reading back directly. That last part is why encrypting it does
-  not work: the plaintext has to exist at resume regardless, so encryption at
-  rest would buy a weaker guarantee than it appears to, and the tmpfs variant
-  trades disk exposure for a path Landlock then has to admit — widening the
+  Pausing a microVM means snapshotting it, and a Firecracker snapshot writes
+  the entire contents of guest RAM to a file — keys, tokens, whatever happened
+  to be on screen. Encrypting it helps less than it sounds like it would: the
+  VMM restores by reading that file directly, so the plaintext has to exist at
+  resume regardless of what is done to it at rest. The tmpfs alternative
+  trades disk exposure for a path Landlock then has to admit, widening the
   allowlist that makes the isolation claim strong in the first place.
 
-  Rooms on `backend = "firecracker"` are now destroyed on disconnect however
-  `keep_window` is set, which is what every room did before `--keep` existed.
-  Docker rooms are unaffected. In a mixed deployment the server names the
-  excluded rooms at startup, rather than leaving an operator to discover it
-  by losing a session.
+  That is a poor thing to have sitting inside the one backend whose whole
+  pitch is that guest escape is in scope, so it is refused rather than shipped
+  with a footnote — and refused *now*, before the freeze, because this is the
+  reversible direction. If the snapshot is ever made genuinely secret, turning
+  `--keep` back on adds a feature; taking it away after 1.0 would have cost a
+  major version.
 
-  **This is a breaking change for anyone running `--keep` on firecracker
-  rooms**, and it is deliberately made before 1.0 rather than after: refusing
-  is the reversible direction, since making the snapshot genuinely secret
-  later would re-enable a feature instead of removing one.
+  In a mixed deployment the server names the excluded rooms at startup, rather
+  than leaving an operator to find out by losing a session.
 
-  The pause/resume machinery is kept, not deleted. A host upgraded from 0.2.x
-  can still hold snapshots an older keycard wrote, and the startup sweep added
-  in 0.2.3 is what reaps them — both that sweep and the tests proving it works
-  need a way to produce a paused room.
+  Upgrading from 0.2.x needs no action unless you were relying on this. Any
+  snapshot an older keycard already wrote is cleared at startup: firecracker
+  instance directories record their owning processes, and any whose owners are
+  all gone are removed. Anything still in use by a live process is left alone.
+  The pause machinery is kept rather than deleted for exactly that reason —
+  deleting it would have stranded the debris it exists to clean up.
 
-  `SECURITY.md` loses a caveat as a result: the plaintext guest-RAM dump is no
+  `SECURITY.md` loses a caveat as a result: a plaintext guest-RAM dump is no
   longer something keycard can produce.
+
+- **`Development Status` is now `5 - Production/Stable`.** It had said
+  `2 - Pre-Alpha` since the very first release — already two steps behind what
+  the README was claiming by 0.2.4.
 
 ## [0.2.4] - 2026-08-09
 
