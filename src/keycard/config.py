@@ -208,6 +208,45 @@ def _parse_rooms(raw: dict[str, object]) -> dict[str, RoomConfig]:
     return rooms
 
 
+def _warn_ignored_room_keys(cfg: Config, raw: dict[str, object]) -> None:
+    """Say so when a room sets a key the backend it runs on will not honour.
+
+    ``pids_limit`` is the only one today, and only under firecracker. It does
+    not map: a microVM has its own kernel and its own process table, so there
+    is no host-side count to cap. What actually bounds a guest is ``memory``
+    and ``cpus``, which Firecracker applies to the VM itself.
+
+    Ignoring the key is therefore the right behaviour — but doing it in
+    silence is not. An operator can write a limit, read it back in their own
+    config, and reasonably believe it is in force; this is the difference
+    between a documented gap and a lie.
+
+    A warning rather than a refusal, matching ``_valid_backend`` above: a key
+    that means nothing on this backend is a misunderstanding worth correcting,
+    not a reason to keep the server from starting. Configs that set it have
+    always started, and an upgrade should not be what stops them.
+    """
+    rooms_table = raw.get("rooms", {})
+    if not isinstance(rooms_table, dict):
+        return
+    for name, val in rooms_table.items():
+        # Only an explicit key is worth a warning — every room carries the
+        # dataclass default, and warning about that would fire for configs
+        # that never mentioned it.
+        if not isinstance(val, dict) or "pids_limit" not in val:
+            continue
+        room = cfg.rooms.get(name)
+        if room is None:  # skipped for a bad image, or replaced by built-ins
+            continue
+        if (room.backend or cfg.backend) == "firecracker":
+            log.warning(
+                "room %s sets pids_limit, which the firecracker backend ignores — "
+                "a microVM has its own kernel and process table, so there is no "
+                "host-side count to cap; bound it with memory and cpus instead",
+                name,
+            )
+
+
 def _confinement(mode: str) -> str:
     """Validate the confinement mode, warning rather than refusing to start.
 
@@ -307,6 +346,10 @@ def load(path: Path | None = None) -> Config:
     if cfg.default_room not in cfg.rooms and cfg.rooms:
         cfg.default_room = next(iter(cfg.rooms))
         log.info("default_room not found; falling back to %s", cfg.default_room)
+
+    # After the backend defaults have settled: which backend a room ends up on
+    # depends on both its own key and the top-level one.
+    _warn_ignored_room_keys(cfg, raw)
 
     log.info(
         "loaded %d room(s) from %s — default: %s",

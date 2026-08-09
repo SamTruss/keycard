@@ -109,7 +109,7 @@ Per-room knobs, all optional:
 | `image` | Required. Any image the daemon can pull or already has. |
 | `memory` | Hard memory cap, e.g. `"512m"`, `"2g"`. Default `1g`. |
 | `cpus` | CPU limit as a core count, e.g. `2`. Default uncapped. |
-| `pids_limit` | Max processes/threads in the container. Default `512`. |
+| `pids_limit` | Max processes/threads in the container. Default `512`. Docker only — see below. |
 | `network` | `"none"` disables outbound networking entirely. |
 | `backend` | `"docker"` (default) or `"firecracker"`. See below before reaching for the second one. |
 
@@ -123,7 +123,11 @@ becomes a VM snapshot — but it is not finished and it is not the default:
 - The guest has **no network at all**. Not "isolated networking" — none.
 - It needs a host with `/dev/kvm`, a guest kernel, and a rootfs built by
   `rootfs/build.sh`.
-- `pids_limit` has no meaning for a microVM and is ignored there.
+- `pids_limit` has no meaning for a microVM and is ignored there. A guest
+  has its own kernel and its own process table, so there is no host-side
+  count to cap — use `memory` and `cpus`, which Firecracker applies to the
+  VM itself. Setting it on a firecracker room logs a warning at startup
+  naming the room, rather than being dropped in silence.
 
 The VMM process itself is confined with [Landlock](https://docs.kernel.org/userspace-api/landlock.html)
 on Linux 5.13+, cutting it down to its own instance directory, the guest

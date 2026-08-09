@@ -8,6 +8,18 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Changed
+
+- **A `pids_limit` the firecracker backend cannot honour now says so.**
+  Setting it on a room that runs on firecracker logs a warning at startup
+  naming the room, instead of being dropped in silence. The key genuinely
+  does not map — a microVM has its own kernel and its own process table, so
+  there is no host-side count to cap, and what actually bounds a guest is
+  `memory` and `cpus` — but an operator who writes a limit and reads it back
+  in their own config has every reason to think it is in force. Behaviour is
+  otherwise unchanged: the key is still ignored, and a config that sets it
+  still loads and still starts.
+
 ## [0.2.2] - 2026-08-09
 
 ### Fixed

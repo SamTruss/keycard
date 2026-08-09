@@ -116,7 +116,10 @@ def machine_config(room: RoomConfig) -> dict[str, int]:
     always a number to supply here. This is also where the guest's RAM
     ceiling comes from, which is why ``confine.py`` does not chase cgroups:
     the guest cannot allocate past this number in the first place.
-    ``pids_limit`` still has no meaning for a microVM and is still ignored.
+    ``pids_limit`` still has no meaning for a microVM and is still ignored —
+    a guest has its own kernel and process table, so there is nothing
+    host-side to cap. `config.py` warns at load when a room sets it, so that
+    is a stated gap rather than a silent one.
     """
     return {
         "vcpu_count": max(1, min(room.cpus or DEFAULT_VCPUS, MAX_VCPUS)),
