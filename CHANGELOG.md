@@ -8,6 +8,24 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-09
+
+### Fixed
+
+- **The documented version had drifted two releases behind the package.**
+  `README.md`, `man/keycard.1` and both pages under `docs/` still said
+  `v0.2.1` after 0.2.2 and 0.2.3 shipped, so the footer of the project page
+  and what `man keycard` printed both named a release that was no longer the
+  current one. Corrected, and now enforced: `tests/test_version_strings.py`
+  fails if any of them disagrees with `keycard.__version__`.
+
+  The cause was that only `pyproject.toml` and `src/keycard/__init__.py` were
+  ever checked — `release.yml` verifies the tag against the first, which is
+  why those two never drifted, and the release checklist named only those
+  two. The other four had nothing watching them. The checklist in
+  CONTRIBUTING.md now points at the test rather than at a list of files,
+  because a list is the thing that went stale.
+
 ## [0.2.3] - 2026-08-09
 
 ### Security
