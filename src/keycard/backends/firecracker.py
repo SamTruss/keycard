@@ -33,7 +33,7 @@ import socket
 import subprocess
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 from ..config import FirecrackerConfig, RoomConfig
@@ -211,7 +211,23 @@ class Instance:
         # RAM. The default runtime_dir is under /tmp, so inheriting the usual
         # 0755 would put all of that within reach of every local user.
         path.mkdir(parents=True, exist_ok=False, mode=OWNER_ONLY)
-        return cls(id=instance_id, dir=path)
+        instance = cls(id=instance_id, dir=path)
+        instance.owner_pid.write_text(f"{os.getpid()}\n")
+        return instance
+
+    @property
+    def owner_pid(self) -> Path:
+        """The keycard process that created this instance.
+
+        Written at creation, before anything else exists in here, so that a
+        directory is attributable from the moment it appears — including
+        during the seconds between `mkdir` and a VMM existing to record.
+        """
+        return self.dir / "owner.pid"
+
+    @property
+    def vmm_pid(self) -> Path:
+        return self.dir / "vmm.pid"
 
     @property
     def api_sock(self) -> Path:
@@ -402,6 +418,108 @@ async def _remove_dir(path: Path) -> None:
     )
 
 
+def _read_pid(pid_file: Path) -> int | None:
+    try:
+        return int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_is_alive(pid_file: Path) -> bool:
+    """Whether *pid_file* names a process that still exists — nothing more.
+
+    Deliberately does not check what the process *is*. This guards a live
+    room, so the two ways of being wrong are not equal: mistaking a live
+    keycard for a dead one deletes a running room's directory, while
+    mistaking a recycled pid for the original only leaves debris a later
+    sweep will catch. Insisting the command line say "keycard" would trade
+    the safe error for the dangerous one every time the binary is invoked
+    under another name — ``python -m keycard``, a wrapper, a supervisor.
+    """
+    pid = _read_pid(pid_file)
+    return pid is not None and Path(f"/proc/{pid}").exists()
+
+
+def _process_is(pid_file: Path, program: str) -> bool:
+    """Whether *pid_file* names a live process running *program*.
+
+    Reads ``/proc`` rather than sending signal 0, because a pid on its own is
+    not evidence: pids are recycled. Here the stricter test is the safe one —
+    it is only reached once the owning keycard is known to be gone, so a
+    recycled number failing to match means the real VMM is dead and its
+    directory really is debris.
+
+    Compares the basename of ``argv[0]`` rather than searching the whole
+    command line, which would match any process that merely *mentions* the
+    program — a path, a config filename, an editor with the source open. The
+    check is about what is running, not what it was pointed at.
+    """
+    pid = _read_pid(pid_file)
+    if pid is None:
+        return False
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    argv0 = raw.split(b"\0", 1)[0]
+    return bool(argv0) and PurePosixPath(argv0.decode(errors="replace")).name == program
+
+
+def instance_is_debris(path: Path) -> bool:
+    """Whether *path* is an instance directory with nothing left using it.
+
+    Two owners have to be gone, not one. The keycard process that created it
+    answers for a room still being built — there are seconds between `mkdir`
+    and a VMM existing, and a concurrent keycard sweeping through that window
+    must not mistake a half-built room for a dead one. The VMM answers for the
+    other direction: if keycard was killed but its firecracker survived, the
+    room is still running and removing the directory would pull the rootfs out
+    from under a live guest.
+    """
+    if not path.is_dir():
+        return False
+    if _pid_is_alive(path / "owner.pid"):
+        return False
+    return not _process_is(path / "vmm.pid", "firecracker")
+
+
+def reap_debris(runtime_dir: Path) -> list[str]:
+    """Remove instance directories a crash left behind. Returns what went.
+
+    `destroy` and `KeptRooms.destroy_all` between them clear up everything a
+    *graceful* exit produces. Neither runs if keycard is SIGKILLed or the host
+    loses power, and what survives is not inert: a paused room's directory
+    holds a plaintext dump of the guest's RAM. SECURITY.md tells operators
+    that dump lives only until the keep window expires and the room is
+    reaped — which was true of every exit except the one an operator is least
+    able to prevent.
+
+    At startup rather than shutdown, and that is the whole reason it can
+    exist. `close()` declines to do this on the way out because a directory
+    it did not create belongs to someone else and removing it would be a
+    guess. On the way in the question is answerable: each instance records
+    who owns it, so debris can be identified rather than assumed.
+
+    Note the two cases have opposite shapes, which is what makes this safe. A
+    *paused* room has no VMM — `pause` stops the process once the snapshot is
+    written — so the directories holding RAM dumps are exactly the ones with
+    nothing running. A *running* room still has its VMM and has taken no
+    snapshot yet, so the directories this refuses to touch are the ones with
+    nothing sensitive at rest.
+    """
+    reaped: list[str] = []
+    try:
+        entries = sorted(runtime_dir.iterdir())
+    except OSError:
+        return reaped
+    for path in entries:
+        if not instance_is_debris(path):
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        reaped.append(path.name)
+    return reaped
+
+
 class FirecrackerBackend(Backend):
     """Opens rooms as microVMs.
 
@@ -419,6 +537,16 @@ class FirecrackerBackend(Backend):
         # under /tmp by default — where a previous release created it 0755,
         # and where anyone can create it first.
         config.runtime_dir.chmod(OWNER_ONLY)
+        # Before any room opens, so a crashed predecessor's plaintext RAM
+        # dumps do not sit on disk for the lifetime of this process too.
+        reaped = reap_debris(config.runtime_dir)
+        if reaped:
+            log.warning(
+                "reaped %d instance director%s left by a previous run: %s",
+                len(reaped),
+                "y" if len(reaped) == 1 else "ies",
+                ", ".join(reaped),
+            )
         log.info(
             "firecracker backend ready: kernel=%s rootfs_dir=%s runtime_dir=%s",
             config.kernel,
@@ -549,6 +677,11 @@ class FirecrackerBackend(Backend):
             console.close()
             if ruleset is not None:
                 os.close(ruleset)
+
+        # Recorded before the readiness wait: if firecracker comes up and this
+        # process dies during it, the startup sweep still has to be able to
+        # tell that the VMM it left behind is alive.
+        instance.vmm_pid.write_text(f"{process.pid}\n")
 
         vm = _MicroVM(instance, FirecrackerApi(instance.api_sock), process)
         try:
@@ -698,5 +831,7 @@ class FirecrackerBackend(Backend):
         `destroy_kept` before shutdown gets here. Anything left in
         ``runtime_dir`` is the debris of a crash, and deleting directories
         this process may not have created is not a thing to do on the way
-        out.
+        out — a concurrent keycard's live rooms look exactly like litter from
+        here. `reap_debris` does it on the way *in* instead, where each
+        directory's recorded owners make the question answerable.
         """

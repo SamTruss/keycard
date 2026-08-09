@@ -8,6 +8,29 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Security
+
+- **A crash used to leave a paused room's guest RAM on disk indefinitely.**
+  `--keep` snapshots a microVM by dumping its memory to the room's instance
+  directory in the clear, and SECURITY.md told operators that dump lived only
+  until the keep window expired and the room was reaped. That was true of
+  every exit except the one an operator is least able to prevent: the sweep
+  ran from `KeptRooms.destroy_all()` on a graceful shutdown, so a `SIGKILL`,
+  an OOM kill or a power cut skipped it — and nothing swept at startup
+  either, leaving the dump under `runtime_dir` until something else removed
+  it.
+
+  Each instance directory now records the keycard process that created it and
+  the VMM running in it, and the firecracker backend sweeps at startup,
+  before any room opens, removing those whose owners are both gone. The two
+  cases have opposite shapes, which is what makes it safe: a *paused* room
+  has no VMM — `pause` stops it once the snapshot is written — so the
+  directories holding RAM dumps are exactly the ones with nothing running,
+  while a *running* room still has its VMM and has taken no snapshot yet. A
+  directory a live keycard or a live firecracker still owns is never touched,
+  so a second keycard sharing a `runtime_dir` cannot destroy the first one's
+  rooms. Only affects the firecracker backend; `--keep` is off by default.
+
 ### Changed
 
 - **A `pids_limit` the firecracker backend cannot honour now says so.**
