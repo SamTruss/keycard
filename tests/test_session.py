@@ -52,6 +52,16 @@ class FakeRoom(Room):
         return FakeKept(self)
 
 
+class UnpausableRoom(FakeRoom):
+    """A room whose backend refuses `--keep`, the way firecracker's does.
+
+    Still implements `pause` — the point of the test is that nothing ever
+    calls it, not that calling it is impossible.
+    """
+
+    can_pause = False
+
+
 class FakeBackend(Backend):
     def __init__(self, room: FakeRoom) -> None:
         self._room = room
@@ -493,6 +503,40 @@ async def test_dropped_connection_destroys_when_window_is_zero() -> None:
 
     assert room.destroy_count == 1
     assert room.pause_count == 0
+
+
+@pytest.mark.timeout(5)
+async def test_dropped_connection_destroys_a_room_that_cannot_be_paused() -> None:
+    """`--keep` is on and the window is open, but the backend refuses to freeze.
+
+    The firecracker case: pausing a microVM means writing the whole of guest
+    RAM to disk in the clear, so the room is destroyed exactly as it would be
+    with `--keep` off.
+
+    The registry assertion is the load-bearing half. Destroying the room but
+    still filing it under the username would leave a reconnect that resumes
+    nothing — strictly worse than not offering one, because the operator
+    would think their session survived.
+    """
+    room = UnpausableRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=10.0)
+    assert kept.enabled
+
+    session = RoomSession(
+        backend, RoomConfig(name="ubuntu", image="ubuntu:24.04"), username="alice", kept=kept
+    )
+    chan = FakeChannel()
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.05)
+
+    session.connection_lost(None)
+    await asyncio.sleep(0.05)
+
+    assert room.pause_count == 0
+    assert room.destroy_count == 1
+    assert kept.take("alice") is None
 
 
 @pytest.mark.timeout(5)

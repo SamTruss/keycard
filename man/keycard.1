@@ -63,7 +63,11 @@ to allow the same username to reconnect and resume it. Overrides the
 .I keep_window
 value from config; unset or
 .I 0
-disables the feature.
+disables the feature. Applies to Docker rooms only: the
+.B firecracker
+backend refuses to pause a room, because snapshotting a microVM writes its
+guest RAM to disk in the clear, so those rooms are destroyed on disconnect
+however this is set. The excluded rooms are named at startup.
 .TP
 .BR \-v ", " \-\-verbose
 Enable debug logging.
@@ -153,10 +157,8 @@ and a built rootfs.
 .PP
 See
 .I SECURITY.md
-in the project repository for the full threat model \(em including what a
-.B \-\-keep
-snapshot writes to disk \(em before exposing keycard beyond a trusted
-network.
+in the project repository for the full threat model before exposing keycard
+beyond a trusted network.
 .SH AUTHOR
 Sam Truss
 .SH SEE ALSO

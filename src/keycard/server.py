@@ -185,7 +185,8 @@ async def _drain(active: ActiveSessions, grace: float) -> None:
 
 
 async def serve(config: Config) -> None:
-    backend: Backend = RoutingBackend(config)
+    routing = RoutingBackend(config)
+    backend: Backend = routing
     active = ActiveSessions()
     kept = KeptRooms(backend, config.keep_window_seconds)
     server = await create_server(config, backend, active_sessions=active, kept_rooms=kept)
@@ -197,6 +198,18 @@ async def serve(config: Config) -> None:
     log.info("try: ssh -p %s ubuntu@localhost", config.port)
     if kept.enabled:
         log.info("--keep enabled: %.0fs to reconnect after a dropped session", kept.window_seconds)
+        # Said at boot rather than on the first disconnect: --keep is often
+        # set once in a unit file and never watched again, and a reconnect
+        # window that silently does not apply to half the rooms is the kind
+        # of thing an operator only finds out by losing work.
+        no_keep = routing.rooms_without_keep()
+        if no_keep:
+            log.warning(
+                "--keep does not apply to %s: pausing a microVM means snapshotting "
+                "guest RAM to disk in the clear, so the firecracker backend refuses "
+                "it — these rooms are destroyed on disconnect",
+                ", ".join(no_keep),
+            )
 
     loop = asyncio.get_running_loop()
     shutdown_requested = asyncio.Event()

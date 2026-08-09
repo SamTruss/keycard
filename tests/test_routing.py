@@ -199,6 +199,48 @@ async def test_one_backend_failing_to_close_does_not_strand_the_others(
     assert backends["firecracker"].closed
 
 
+async def test_routed_room_passes_through_can_pause() -> None:
+    """The wrapper must not claim a capability the room underneath refuses.
+
+    If it did, `--keep` would snapshot a microVM — the wrapper is the only
+    thing the session ever sees.
+    """
+    inner = FakeRoom("firecracker")
+    inner.can_pause = False
+    assert routing.RoutedRoom("firecracker", inner).can_pause is False
+    assert routing.RoutedRoom("docker", FakeRoom("docker")).can_pause is True
+
+
+def test_rooms_without_keep_names_rooms_on_a_refusing_backend(
+    factories: dict[str, routing.BackendFactory], backends: dict[str, FakeBackend]
+) -> None:
+    router = routing.RoutingBackend(_config(backend="docker"), factories)
+    backends["firecracker"].can_pause = False
+
+    # "vm" sets backend = "firecracker" explicitly; "ubuntu" stays on docker.
+    assert router.rooms_without_keep() == ["vm"]
+
+
+def test_rooms_without_keep_covers_rooms_that_inherit_the_backend(
+    factories: dict[str, routing.BackendFactory], backends: dict[str, FakeBackend]
+) -> None:
+    """The subtlety worth pinning: a room with no `backend` key inherits the
+    top-level one, so reading only `[rooms.*]` misses the commonest way to
+    land on firecracker — the same trap `pids_limit`'s warning had to avoid.
+    """
+    router = routing.RoutingBackend(_config(backend="firecracker"), factories)
+    backends["firecracker"].can_pause = False
+
+    assert router.rooms_without_keep() == ["ubuntu", "vm"]
+
+
+def test_rooms_without_keep_is_empty_when_every_backend_pauses(
+    factories: dict[str, routing.BackendFactory],
+) -> None:
+    router = routing.RoutingBackend(_config(backend="docker"), factories)
+    assert router.rooms_without_keep() == []
+
+
 def test_unknown_backend_name_is_refused(
     factories: dict[str, routing.BackendFactory],
 ) -> None:

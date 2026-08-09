@@ -78,7 +78,7 @@ merely unstarted.
 
 - [x] Backend interface abstraction (designed from day one, now exercised by a second implementation)
 - [x] Rootfs image builds (`rootfs/`, with the guest agent in `guest-agent/`)
-- [x] Firecracker microVM provisioning, including `--keep` as a VM snapshot
+- [x] Firecracker microVM provisioning (`--keep` is refused here — a snapshot would write guest RAM to disk in the clear)
 - [x] Confining the VMM — Landlock rather than the jailer, which needs root
 - [x] Real isolation boundary, claimed in SECURITY.md for rooms with no network, which is every microVM room
 - [ ] Tap networking — deliberately deferred, not merely unstarted; both ways of building it cost more security than the feature is currently worth. Reasoning under Phase 3 in [FIRECRACKER.md](FIRECRACKER.md).

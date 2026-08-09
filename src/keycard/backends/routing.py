@@ -73,6 +73,12 @@ class RoutedRoom(Room):
         self.backend_name = backend_name
         self.inner = inner
 
+    @property
+    def can_pause(self) -> bool:  # type: ignore[override]
+        # Pass-through like the rest: the wrapper must not claim a capability
+        # the room underneath refuses, or `--keep` would snapshot a microVM.
+        return self.inner.can_pause
+
     async def read(self) -> bytes:
         return await self.inner.read()
 
@@ -121,6 +127,19 @@ class RoutingBackend(Backend):
 
     def _name_for(self, room: RoomConfig) -> str:
         return room.backend or self._config.backend
+
+    def rooms_without_keep(self) -> list[str]:
+        """Rooms whose backend refuses to be paused, so `--keep` skips them.
+
+        Answered here because this is the only place that knows which backend
+        a room actually lands on: `backend` can be set per room or inherited
+        from the top level, and both spellings are common.
+        """
+        return sorted(
+            room.name
+            for room in self._config.rooms.values()
+            if not self._get(self._name_for(room)).can_pause
+        )
 
     async def open(self, room: RoomConfig, width: int, height: int) -> Room:
         name = self._name_for(room)

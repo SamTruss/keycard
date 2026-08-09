@@ -8,6 +8,36 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Changed
+
+- **`--keep` is now refused on the firecracker backend.** Pausing a microVM
+  means snapshotting it, and a Firecracker snapshot dumps the whole of guest
+  RAM — keys, tokens, whatever was on screen — to a file the VMM later
+  restores by reading back directly. That last part is why encrypting it does
+  not work: the plaintext has to exist at resume regardless, so encryption at
+  rest would buy a weaker guarantee than it appears to, and the tmpfs variant
+  trades disk exposure for a path Landlock then has to admit — widening the
+  allowlist that makes the isolation claim strong in the first place.
+
+  Rooms on `backend = "firecracker"` are now destroyed on disconnect however
+  `keep_window` is set, which is what every room did before `--keep` existed.
+  Docker rooms are unaffected. In a mixed deployment the server names the
+  excluded rooms at startup, rather than leaving an operator to discover it
+  by losing a session.
+
+  **This is a breaking change for anyone running `--keep` on firecracker
+  rooms**, and it is deliberately made before 1.0 rather than after: refusing
+  is the reversible direction, since making the snapshot genuinely secret
+  later would re-enable a feature instead of removing one.
+
+  The pause/resume machinery is kept, not deleted. A host upgraded from 0.2.x
+  can still hold snapshots an older keycard wrote, and the startup sweep added
+  in 0.2.3 is what reaps them — both that sweep and the tests proving it works
+  need a way to produce a paused room.
+
+  `SECURITY.md` loses a caveat as a result: the plaintext guest-RAM dump is no
+  longer something keycard can produce.
+
 ## [0.2.4] - 2026-08-09
 
 ### Fixed
