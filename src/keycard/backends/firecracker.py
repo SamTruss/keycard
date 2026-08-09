@@ -280,6 +280,31 @@ class FirecrackerKept(Kept):
 
 
 class FirecrackerRoom(Room):
+    # No `--keep` on a microVM. Pausing one means snapshotting it, and a
+    # Firecracker snapshot writes the whole of guest RAM to a file the VMM
+    # later restores by reading directly — so it cannot be encrypted at rest
+    # without still being plaintext at resume. Everything the guest touched
+    # (keys, tokens, whatever was in a scrollback) would sit on disk in the
+    # clear for the length of the window.
+    #
+    # That is a poor trade inside the one backend whose whole claim is that
+    # guest escape is in scope, so the feature is refused rather than shipped
+    # with a caveat. Rooms on this backend are destroyed on disconnect, which
+    # is what every room did before `--keep` existed.
+    #
+    # Refusing is also the reversible direction: if the snapshot is ever made
+    # genuinely secret, flipping this back to True adds a feature, while
+    # taking it away later would break one.
+    #
+    # `pause`, `resume` and `destroy_kept` below are deliberately NOT deleted
+    # along with the feature. A host upgraded from 0.2.x can still have
+    # snapshots on disk that an older keycard wrote, and the startup sweep
+    # added in 0.2.3 is what reaps them — that sweep, and the tests that
+    # prove it works, both need a way to produce a paused room. Keeping the
+    # machinery and refusing to reach for it is what lets old debris still
+    # be cleaned up instead of stranded.
+    can_pause = False
+
     def __init__(self, vm: _MicroVM, data: socket.socket, ctrl: socket.socket) -> None:
         self._vm = vm
         self._data = data
@@ -528,6 +553,9 @@ class FirecrackerBackend(Backend):
     disk. That is also why the preflight below can afford to be strict: by
     the time it runs, someone has explicitly asked for this backend.
     """
+
+    # Must match `FirecrackerRoom.can_pause`, where the reasoning lives.
+    can_pause = False
 
     def __init__(self, config: FirecrackerConfig) -> None:
         self._config = config

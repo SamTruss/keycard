@@ -308,10 +308,26 @@ room's disk image — and, after `pause`, a plaintext dump of its RAM. Now
 `0700`, with an existing directory tightened rather than trusted, since it
 lives somewhere anyone can create first.
 
-Two caveats are stated in `SECURITY.md` rather than fixed, because both are
-real: a `--keep` snapshot writes guest RAM to disk unencrypted, and both
-backends sit behind the same SSH front door, where a pre-auth flaw is a
-compromise regardless of backend.
+One caveat is stated in `SECURITY.md` rather than fixed, because it is real:
+both backends sit behind the same SSH front door, where a pre-auth flaw is a
+compromise regardless of backend. The other — a `--keep` snapshot writing
+guest RAM to disk unencrypted — was closed by refusing the feature here; see
+below.
+
+**`--keep` is refused on this backend.** Pausing a microVM means snapshotting
+it, and Firecracker restores from the memory file by reading it directly, so
+the plaintext has to exist at resume whatever is done to it at rest. That
+makes encryption a large amount of work for a guarantee weaker than it looks,
+and the tmpfs variant trades disk exposure for a path Landlock then has to
+admit — widening the confinement allowlist that makes the claim strong in the
+first place. Refusing costs a reconnect window on an opt-in feature of an
+opt-in backend, and it is the reversible direction: making the snapshot
+genuinely secret later would re-enable a feature rather than break one.
+
+The pause/resume machinery is deliberately **not** deleted along with the
+feature. A host upgraded from 0.2.x can still hold snapshots an older keycard
+wrote, and `reap_debris` is what clears them — both that sweep and the tests
+proving it works need a way to produce a paused room.
 
 ## Questions this phase settled
 
@@ -350,16 +366,9 @@ compromise regardless of backend.
   before closing the data channel, which is a mitigation, not a fix. The
   proper answer is to read the pty to EOF, which risks hanging on an orphan
   holding the slave open.
-- **A `--keep` snapshot is still unencrypted at rest.** `reap_debris` bounded
-  how long it survives — a crash no longer leaves guest RAM on disk
-  indefinitely, because startup sweeps instance directories whose keycard and
-  VMM are both gone. It did not make the dump secret while it legitimately
-  exists. Encrypting it is the remaining question and it is not a small one:
-  Firecracker restores from a memory file it reads directly, so the plaintext
-  has to exist somewhere at resume, and moving it to a tmpfs trades disk
-  exposure for a path Landlock then has to admit. The cheaper alternative, if
-  it ever stops being worth the complexity, is to refuse `--keep` on
-  firecracker rooms outright.
+- ~~**A `--keep` snapshot is still unencrypted at rest.**~~ **Settled: the
+  feature is refused on this backend.** See "Questions this phase settled"
+  below.
 
 ## Sequencing
 

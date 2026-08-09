@@ -379,3 +379,39 @@ def test_reap_debris_removes_only_the_dead(tmp_path: Path) -> None:
 
 def test_reap_debris_on_a_missing_runtime_dir_is_a_noop(tmp_path: Path) -> None:
     assert fc.reap_debris(tmp_path / "never-created") == []
+
+
+# -- --keep is refused ------------------------------------------------------
+
+
+def test_the_backend_refuses_to_pause() -> None:
+    """No `--keep` on a microVM.
+
+    A Firecracker snapshot writes the whole of guest RAM to a file the VMM
+    later restores by reading it directly, so it cannot be made secret at
+    rest without still being plaintext at resume. Refused rather than
+    shipped with a caveat — see `FirecrackerRoom.can_pause`.
+    """
+    assert fc.FirecrackerRoom.can_pause is False
+
+
+def test_room_and_backend_agree_about_pausing() -> None:
+    """The two declarations must not drift.
+
+    `Room.can_pause` is what actually gates the pause at teardown;
+    `Backend.can_pause` is what lets `serve()` warn at boot, before any room
+    exists. If they disagree the server either promises a reconnect window it
+    will not honour, or warns about one it would have given.
+    """
+    assert fc.FirecrackerRoom.can_pause is fc.FirecrackerBackend.can_pause
+
+
+def test_pause_is_kept_even_though_nothing_calls_it() -> None:
+    """Deliberately not deleted along with the feature.
+
+    A host upgraded from 0.2.x can still hold snapshots an older keycard
+    wrote, and the startup sweep is what reaps them — both that sweep and the
+    tests proving it works need a way to produce a paused room.
+    """
+    assert callable(fc.FirecrackerRoom.pause)
+    assert callable(fc.FirecrackerBackend.destroy_kept)

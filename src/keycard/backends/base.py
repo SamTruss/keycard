@@ -26,6 +26,21 @@ class Kept:
 class Room(abc.ABC):
     """A single live sandbox with an attached pty."""
 
+    can_pause: bool = True
+    """Whether `--keep` may pause this room instead of destroying it.
+
+    A backend sets this False when freezing a room would cost more than the
+    reconnect window is worth. Firecracker does: a snapshot writes the whole
+    of guest RAM to disk in the clear, and there is no way to take one that
+    doesn't, because the VMM restores by reading that file back directly.
+
+    Enforced in `RoomSession._run_teardown`, which destroys instead. It is a
+    property of the room rather than of the config because the room is the
+    only thing that still knows which backend actually built it — `backend`
+    can be set per room or inherited from the top level, and by teardown the
+    session no longer has either.
+    """
+
     @abc.abstractmethod
     async def read(self) -> bytes:
         """Return the next chunk of output. Empty bytes means the room ended."""
@@ -55,11 +70,23 @@ class Room(abc.ABC):
         but leaves the sandbox itself intact, so a later `Backend.resume` can
         pick it back up. Used for `--keep`: a dropped connection gets a
         window to reconnect instead of losing its room outright.
+
+        Only called on rooms whose `can_pause` is True.
         """
 
 
 class Backend(abc.ABC):
     """Builds rooms."""
+
+    can_pause: bool = True
+    """Whether rooms from this backend can be paused — see `Room.can_pause`.
+
+    The same answer as the rooms it builds, declared up here so startup can
+    ask it before any room exists. `Room.can_pause` is what actually gates
+    the pause; this is what lets the server warn about it at boot rather
+    than leaving the operator to discover it on their first disconnect.
+    A test pins the two together so they cannot drift apart.
+    """
 
     @abc.abstractmethod
     async def open(self, room: RoomConfig, width: int, height: int) -> Room:

@@ -258,7 +258,7 @@ Containers share a kernel with the host, and escapes are a real, recurring class
 
 Shipping today: public-key auth only, no Docker socket passthrough, no host mounts, dropped capabilities, optional per-room network isolation. Full threat model in [SECURITY.md](https://github.com/SamTruss/keycard/blob/main/SECURITY.md).
 
-**The microVM backend is the answer to that box.** `backend = "firecracker"` gives a room its own kernel behind KVM with no network device attached, and for those rooms guest escape *is* in scope — a real boundary rather than hygiene. It's opt-in, needs `/dev/kvm` and a built rootfs, and comes with caveats worth reading before you lean on it.
+**The microVM backend is the answer to that box.** `backend = "firecracker"` gives a room its own kernel behind KVM with no network device attached, and for those rooms guest escape *is* in scope — a real boundary rather than hygiene. It's opt-in, needs `/dev/kvm` and a built rootfs, doesn't support `--keep` (pausing a microVM would write its guest RAM to disk in the clear, so it's refused), and comes with caveats worth reading before you lean on it.
 
 ---
 

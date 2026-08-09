@@ -43,7 +43,7 @@ interactive only — see `RoomSession.exec_requested`).
 | `banner.py` | The ASCII banners written to the operator console and the SSH session. Pure string formatting. |
 | `backends/base.py` | The `Backend`/`Room`/`Kept` abstract interface — see below. |
 | `backends/docker.py` | `DockerBackend`/`DockerRoom`/`DockerKept`. The default, and the only one that has shipped. |
-| `backends/firecracker.py` | `FirecrackerBackend`/`FirecrackerRoom`/`FirecrackerKept`: rooms as microVMs, `--keep` as a VM snapshot. Opt-in, still incomplete — see [FIRECRACKER.md](FIRECRACKER.md). |
+| `backends/firecracker.py` | `FirecrackerBackend`/`FirecrackerRoom`/`FirecrackerKept`: rooms as microVMs. Opt-in, still incomplete, and `--keep` is refused here (`can_pause = False`) — see [FIRECRACKER.md](FIRECRACKER.md). |
 | `backends/vsock.py` | The vsock plumbing under that backend: the Firecracker `CONNECT`/`OK` handshake, and the two channels (pty data, control) the guest agent speaks over. |
 | `backends/fcapi.py` | Firecracker's REST-over-a-UNIX-socket control API, which is how a VM gets configured, booted, snapshotted and restored. |
 | `backends/routing.py` | `RoutingBackend`: itself a `Backend`, so that per-room backend selection stays invisible above the seam. |
@@ -119,7 +119,7 @@ other:
 | Trigger | Where | Result |
 |---|---|---|
 | Shell exits on its own (client typed `exit`) | `RoomSession._run()`'s read loop breaks; its `finally` checks out | Room destroyed, real exit status forwarded |
-| Connection drops while the shell is still running | `RoomSession.connection_lost()` | Room destroyed — or, with `--keep` on, paused via `KeptRooms.keep()` instead |
+| Connection drops while the shell is still running | `RoomSession.connection_lost()` | Room destroyed — or, with `--keep` on *and* the room's backend willing to pause, held via `KeptRooms.keep()` instead |
 | No traffic for `idle_timeout` | `RoomSession._idle_watchdog()` | Room destroyed, client sees exit `124` |
 | `shutdown_grace` expires during server shutdown | `RoomSession.force_close()`, called from `server._drain()` | Room destroyed, client sees exit `143` |
 | `--keep` window expires unclaimed | `KeptRooms._expire()` | Paused room destroyed, no client attached |
@@ -156,6 +156,16 @@ deliberate goodbye and always destroys, regardless of `--keep`. That is what
 `allow_keep` on `_begin_teardown` selects, and only `connection_lost` passes
 it — so whichever trigger wins the race also decides whether the room is
 eligible to be paused.
+
+Eligibility has a second half: `Room.can_pause`. A backend sets it False when
+freezing a room would cost more than the reconnect window is worth, and
+firecracker does — a snapshot writes the whole of guest RAM to disk in the
+clear. Those rooms are destroyed on disconnect however `keep_window` is set.
+It lives on the room rather than the config because the room is the only
+thing that still knows which backend actually built it: `backend` can be set
+per room or inherited from the top level, and by teardown the session has
+neither. `Backend.can_pause` mirrors it so `serve()` can warn at boot, before
+any room exists, and a test pins the two together.
 
 Graceful shutdown (`server._drain`) and `--keep` interact with the same
 registries but don't know about each other: `_drain` only touches

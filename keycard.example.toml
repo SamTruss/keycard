@@ -24,6 +24,11 @@ shutdown_grace = "30s"
 # reconnect and pick up right where they left off. "0" (the default) turns
 # this off — a dropped connection is destroyed immediately, as in v1.
 # Also settable per-run with `keycard up --keep 10m`.
+#
+# Docker rooms only. The firecracker backend refuses to be paused, because
+# snapshotting a microVM writes the whole of its guest RAM to disk in the
+# clear; those rooms are destroyed on disconnect whatever this is set to.
+# In a mixed deployment the server names the excluded rooms at startup.
 keep_window = "0"
 
 # What opens a room by default: "docker" (v1, the only one that has ever

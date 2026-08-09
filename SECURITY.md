@@ -46,12 +46,15 @@ If a room ever gains a network, this claim gets re-scoped rather than silently e
 - A host running an unpatched kernel or CPU microcode. The boundary is your host's KVM — keycard cannot make an out-of-date hypervisor safe
 - Being root *inside* your own room. That is the product, not a finding
 
-**Two things worth knowing before you rely on this:**
+**One thing worth knowing before you rely on this:**
 
-1. **A paused room's memory is written to disk in the clear.** `--keep` snapshots the guest by dumping its RAM to the room's instance directory, so anything that was in that room's memory — keys, tokens, whatever was on screen — sits unencrypted on the host until the keep window expires and the room is reaped. The directory is `0700`, so it is readable only by the user running keycard, but it is not encrypted. If that matters to you, run without `--keep` — which is the default; the feature is off unless you set `keep_window`.
+1. **The front door is shared.** Both backends sit behind the same SSH layer. A pre-authentication flaw there is a keycard compromise no matter which backend a room would have used, and no amount of guest isolation helps.
 
-   That reaping now survives a crash. It used to depend on a graceful exit: a `SIGKILL` or a power cut skipped the sweep and left the dump on disk indefinitely, which made the bound above true of every exit except the one you are least able to prevent. Firecracker rooms record who owns each instance directory, and startup removes any whose owning keycard and VMM are both gone. A directory still in use by a live process is never touched, so the window is now "until the keep window expires, or until keycard next starts" rather than "forever, if it died badly".
-2. **The front door is shared.** Both backends sit behind the same SSH layer. A pre-authentication flaw there is a keycard compromise no matter which backend a room would have used, and no amount of guest isolation helps.
+**`--keep` is refused on this backend, on purpose.** Pausing a microVM means snapshotting it, and a Firecracker snapshot dumps the whole of guest RAM to a file — keys, tokens, whatever was on screen — which the VMM later restores by reading back directly. That last part is why encrypting it does not work: the plaintext has to exist at resume regardless, so encryption at rest would buy a weaker guarantee than it appears to. Rather than ship a reconnect window with a plaintext-secrets caveat attached, rooms on `backend = "firecracker"` are destroyed on disconnect, exactly as every room was before `--keep` existed.
+
+Docker rooms are unaffected and still honour `keep_window`. In a mixed deployment the server says at startup which rooms `--keep` will not apply to, rather than leaving you to discover it by losing a session.
+
+If you are upgrading from 0.2.x, snapshots an older keycard already wrote may still be on disk. Startup reaps them: firecracker instance directories record their owning keycard and VMM processes, and any whose owners are both gone are removed. A directory still in use by a live process is never touched.
 
 The Docker backend's posture is unchanged by any of this, and it is still the default. See [FIRECRACKER.md](FIRECRACKER.md) for what is built and what is not.
 
@@ -83,4 +86,4 @@ Expect an acknowledgement within a few days. This is a side project maintained b
 - Do not mount host paths or pass the Docker socket into rooms.
 - Set `network = "none"` for rooms that don't need outbound access.
 - On a shared or internet-facing host, put keycard behind a firewall and treat every authorised key as trusted.
-- For the strongest posture available today: `backend = "firecracker"`, `confinement = "required"` under `[firecracker]`, and no `--keep`.
+- For the strongest posture available today: `backend = "firecracker"` with `confinement = "required"` under `[firecracker]`. `--keep` needs no mention here any more — that backend refuses it.

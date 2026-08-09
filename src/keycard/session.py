@@ -232,17 +232,30 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         try:
             if room is None:
                 return
-            if allow_keep and self._kept is not None and self._kept.enabled:
-                try:
-                    await self._kept.keep(self._username, room)
+            kept = self._kept if allow_keep else None
+            if kept is not None and kept.enabled:
+                if room.can_pause:
+                    try:
+                        await kept.keep(self._username, room)
+                        log.info(
+                            "room paused for %r (%.0fs to reconnect)",
+                            self._username,
+                            kept.window_seconds,
+                        )
+                        return
+                    except Exception:
+                        log.exception("pause failed; destroying room instead")
+                else:
+                    # Not a failure, so not an exception: this backend refuses
+                    # to be frozen (see `Room.can_pause`), and the room is
+                    # destroyed below exactly as it would be without --keep.
+                    # Said out loud every time, because the operator asked for
+                    # a reconnect window and is not getting one for this room.
                     log.info(
-                        "room paused for %r (%.0fs to reconnect)",
+                        "room for %r runs on a backend that cannot be paused; "
+                        "destroying instead of keeping it",
                         self._username,
-                        self._kept.window_seconds,
                     )
-                    return
-                except Exception:
-                    log.exception("pause failed; destroying room instead")
             self._status = await self._checkout(room)
         finally:
             self._release()

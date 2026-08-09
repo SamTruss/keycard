@@ -117,12 +117,17 @@ Per-room knobs, all optional:
 
 There is a second backend that opens each room as a Firecracker microVM
 instead of a container, selected with `backend = "firecracker"` either at
-the top level or per room. It works — rooms boot, shells run, `--keep`
-becomes a VM snapshot — but it is not finished and it is not the default:
+the top level or per room. It works — rooms boot, shells run — but it is
+not finished and it is not the default:
 
 - The guest has **no network at all**. Not "isolated networking" — none.
 - It needs a host with `/dev/kvm`, a guest kernel, and a rootfs built by
   `rootfs/build.sh`.
+- **`--keep` does not apply.** Pausing a microVM means snapshotting guest
+  RAM to disk in the clear, so this backend refuses it: firecracker rooms
+  are destroyed on disconnect however `keep_window` is set. Docker rooms in
+  the same deployment still keep their reconnect window, and the server
+  names the excluded rooms at startup.
 - `pids_limit` has no meaning for a microVM and is ignored there. A guest
   has its own kernel and its own process table, so there is no host-side
   count to cap — use `memory` and `cpus`, which Firecracker applies to the
@@ -141,10 +146,10 @@ confinement = "required"
 ```
 
 For rooms like these — their own kernel, no network device — **guest escape
-is in scope**, which is the boundary v1 never claimed. Two caveats before
-you lean on it: a `--keep` snapshot writes the guest's RAM to disk in the
-clear, and both backends sit behind the same SSH front door. Read
-[SECURITY.md](SECURITY.md) for the full statement. Setup and current status
+is in scope**, which is the boundary v1 never claimed. One caveat before you
+lean on it: both backends sit behind the same SSH front door, so a
+pre-authentication flaw there is a compromise whichever backend a room would
+have used. Read [SECURITY.md](SECURITY.md) for the full statement. Setup and current status
 are in [FIRECRACKER.md](FIRECRACKER.md); the config knobs are the
 `[firecracker]` table in
 [keycard.example.toml](keycard.example.toml).
@@ -182,6 +187,11 @@ shell is still running* — a typed `exit` still destroys immediately, since
 that's a deliberate goodbye, not a disconnect. Reconnect under the same
 username within the window and you're back where you left off, background
 jobs included; miss the window and it's destroyed like normal.
+
+Docker rooms only — the firecracker backend refuses to be paused, because
+doing so would write guest RAM to disk in the clear. Firecracker rooms are
+destroyed on disconnect whatever `keep_window` says, and the server names
+them at startup so a mixed deployment doesn't surprise you.
 
 ```bash
 keycard up --keep 10m
