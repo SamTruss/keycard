@@ -350,6 +350,16 @@ compromise regardless of backend.
   before closing the data channel, which is a mitigation, not a fix. The
   proper answer is to read the pty to EOF, which risks hanging on an orphan
   holding the slave open.
+- **A `--keep` snapshot is still unencrypted at rest.** `reap_debris` bounded
+  how long it survives — a crash no longer leaves guest RAM on disk
+  indefinitely, because startup sweeps instance directories whose keycard and
+  VMM are both gone. It did not make the dump secret while it legitimately
+  exists. Encrypting it is the remaining question and it is not a small one:
+  Firecracker restores from a memory file it reads directly, so the plaintext
+  has to exist somewhere at resume, and moving it to a tmpfs trades disk
+  exposure for a path Landlock then has to admit. The cheaper alternative, if
+  it ever stops being worth the complexity, is to refuse `--keep` on
+  firecracker rooms outright.
 
 ## Sequencing
 

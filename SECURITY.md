@@ -48,7 +48,9 @@ If a room ever gains a network, this claim gets re-scoped rather than silently e
 
 **Two things worth knowing before you rely on this:**
 
-1. **A paused room's memory is written to disk in the clear.** `--keep` snapshots the guest by dumping its RAM to the room's instance directory, so anything that was in that room's memory — keys, tokens, whatever was on screen — sits unencrypted on the host until the keep window expires and the room is reaped. The directory is `0700`, so it is readable only by the user running keycard, but it is not encrypted. If that matters to you, run without `--keep`.
+1. **A paused room's memory is written to disk in the clear.** `--keep` snapshots the guest by dumping its RAM to the room's instance directory, so anything that was in that room's memory — keys, tokens, whatever was on screen — sits unencrypted on the host until the keep window expires and the room is reaped. The directory is `0700`, so it is readable only by the user running keycard, but it is not encrypted. If that matters to you, run without `--keep` — which is the default; the feature is off unless you set `keep_window`.
+
+   That reaping now survives a crash. It used to depend on a graceful exit: a `SIGKILL` or a power cut skipped the sweep and left the dump on disk indefinitely, which made the bound above true of every exit except the one you are least able to prevent. Firecracker rooms record who owns each instance directory, and startup removes any whose owning keycard and VMM are both gone. A directory still in use by a live process is never touched, so the window is now "until the keep window expires, or until keycard next starts" rather than "forever, if it died badly".
 2. **The front door is shared.** Both backends sit behind the same SSH layer. A pre-authentication flaw there is a keycard compromise no matter which backend a room would have used, and no amount of guest isolation helps.
 
 The Docker backend's posture is unchanged by any of this, and it is still the default. See [FIRECRACKER.md](FIRECRACKER.md) for what is built and what is not.

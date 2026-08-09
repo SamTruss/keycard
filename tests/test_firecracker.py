@@ -272,3 +272,110 @@ def test_default_boot_args_name_the_init_the_rootfs_actually_ships() -> None:
     # cmdline; a mismatch is a microVM that boots to nothing.
     assert "init=/usr/sbin/keycard-init" in DEFAULT_BOOT_ARGS
     assert "console=ttyS0" in DEFAULT_BOOT_ARGS
+
+
+# -- reaping what a crash left behind ----------------------------------------
+#
+# A graceful exit clears up after itself; a SIGKILL or a power cut does not,
+# and a paused room's directory holds a plaintext dump of the guest's RAM.
+# These run anywhere — no /dev/kvm, no firecracker binary.
+
+
+def _instance_dir(tmp_path: Path, name: str, *, owner: str = "", vmm: str = "") -> Path:
+    path = tmp_path / name
+    path.mkdir()
+    (path / "memory").write_bytes(b"pretend guest RAM")
+    if owner:
+        (path / "owner.pid").write_text(owner)
+    if vmm:
+        (path / "vmm.pid").write_text(vmm)
+    return path
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_a_directory_whose_owners_are_both_gone_is_debris(tmp_path: Path) -> None:
+    # pid 0 is never a real process, so both owners read as dead.
+    path = _instance_dir(tmp_path, "ubuntu-dead", owner="0", vmm="0")
+    assert fc.instance_is_debris(path) is True
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_a_live_keycard_owner_protects_a_half_built_room(tmp_path: Path) -> None:
+    """The window between `mkdir` and a VMM existing is real, and a concurrent
+    keycard sweeping through it must not take a room that is still opening."""
+    import os
+
+    path = _instance_dir(tmp_path, "ubuntu-building", owner=str(os.getpid()))
+    assert fc.instance_is_debris(path) is False
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_a_live_vmm_protects_a_running_room(tmp_path: Path) -> None:
+    """If keycard was killed but its firecracker survived, the room is still
+    running — removing the directory would pull the rootfs out from under a
+    live guest. This test process stands in for the VMM, so the argv it is
+    matched against is the one actually running it."""
+    import os
+    import sys
+
+    path = _instance_dir(tmp_path, "ubuntu-orphaned", owner="0", vmm=str(os.getpid()))
+    stand_in = Path(sys.executable).name
+    assert fc._process_is(path / "vmm.pid", stand_in) is True
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_a_recycled_vmm_pid_does_not_pass_for_firecracker(tmp_path: Path) -> None:
+    """A pid alone is not evidence, and the VMM check is where that bites:
+    this process is alive and holds the recorded number, but it is not
+    firecracker, so the real VMM is gone and the directory really is debris."""
+    import os
+
+    path = _instance_dir(tmp_path, "ubuntu-recycled", owner="0", vmm=str(os.getpid()))
+    assert fc._process_is(path / "vmm.pid", "firecracker") is False
+    assert fc.instance_is_debris(path) is True
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_a_live_owner_is_not_required_to_be_named_keycard(tmp_path: Path) -> None:
+    """The owner check must not insist on a command line.
+
+    `python -m keycard`, a wrapper script or a supervisor all leave a live
+    keycard whose argv says something else, and reaping a running room's
+    directory is a far worse failure than leaving debris for the next sweep.
+    This test process is exactly such a case — alive, and not named keycard.
+    """
+    import os
+
+    path = _instance_dir(tmp_path, "ubuntu-oddly-named", owner=str(os.getpid()))
+    assert fc._process_is(path / "owner.pid", "keycard") is False
+    assert fc.instance_is_debris(path) is False
+
+
+def test_an_unreadable_pid_file_counts_as_dead(tmp_path: Path) -> None:
+    """A directory with no pid files at all predates this bookkeeping, or was
+    interrupted before writing one. Either way nothing is using it."""
+    path = _instance_dir(tmp_path, "ubuntu-nopids")
+    assert fc.instance_is_debris(path) is True
+
+    garbage = _instance_dir(tmp_path, "ubuntu-garbage", owner="not-a-pid", vmm="")
+    assert fc.instance_is_debris(garbage) is True
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="needs /proc")
+def test_reap_debris_removes_only_the_dead(tmp_path: Path) -> None:
+    import os
+
+    dead = _instance_dir(tmp_path, "ubuntu-dead", owner="0", vmm="0")
+    live = _instance_dir(tmp_path, "ubuntu-live", owner=str(os.getpid()))
+
+    reaped = fc.reap_debris(tmp_path)
+
+    assert reaped == ["ubuntu-dead"]
+    assert not dead.exists()
+    # And the RAM dump went with it, which is the entire point.
+    assert not (dead / "memory").exists()
+    assert live.exists()
+
+
+def test_reap_debris_on_a_missing_runtime_dir_is_a_noop(tmp_path: Path) -> None:
+    assert fc.reap_debris(tmp_path / "never-created") == []

@@ -28,7 +28,12 @@ import pytest
 
 from keycard.backends import confine
 from keycard.backends.base import Room
-from keycard.backends.firecracker import FirecrackerBackend, FirecrackerKept, kvm_present
+from keycard.backends.firecracker import (
+    FirecrackerBackend,
+    FirecrackerKept,
+    kvm_present,
+    reap_debris,
+)
 from keycard.config import Config, FirecrackerConfig, RoomConfig
 from keycard.server import create_server
 
@@ -198,6 +203,52 @@ async def test_destroy_kept_actually_frees_the_snapshot_disk(
 
     assert not kept.instance.dir.exists()
     assert not list((tmp_path / "run").iterdir())
+
+
+async def test_a_crash_does_not_leave_a_real_ram_dump_on_disk(
+    backend: FirecrackerBackend, tmp_path: Path
+) -> None:
+    """The end of the `--keep` exposure, against a real snapshot.
+
+    SECURITY.md tells operators a paused room's memory sits on disk only
+    until the keep window expires and the room is reaped. Nothing kept that
+    promise across a SIGKILL: `KeptRooms.destroy_all` never runs, and no
+    later start swept up. Here the crash is simulated the only way that is
+    honest — a real microVM, really paused, with a real dump of its guest RAM
+    on disk, and the owning process recorded as gone.
+    """
+    room = await backend.open(RoomConfig(name=ROOM, image="ubuntu:24.04"), 80, 24)
+    kept = await room.pause()
+    assert isinstance(kept, FirecrackerKept)
+    instance = kept.instance
+    # The thing that actually matters: guest RAM, in the clear, on disk.
+    assert instance.mem_file.stat().st_size > 0
+
+    # `pause` stops the VMM, so the only owner left is the keycard process.
+    # Standing in for its death: a pid that cannot be alive.
+    instance.owner_pid.write_text("0\n")
+
+    reaped = reap_debris(tmp_path / "run")
+
+    assert instance.id in reaped
+    assert not instance.dir.exists()
+    assert not instance.mem_file.exists()
+
+
+async def test_a_sweep_does_not_touch_a_room_this_process_is_still_using(
+    backend: FirecrackerBackend, tmp_path: Path
+) -> None:
+    """The other half, and the one that would hurt: a running room's rootfs
+    must survive a sweep, or starting a second keycard destroys the first
+    one's guests."""
+    room = await backend.open(RoomConfig(name=ROOM, image="ubuntu:24.04"), 80, 24)
+    live = sorted((tmp_path / "run").iterdir())
+    assert len(live) == 1
+
+    assert reap_debris(tmp_path / "run") == []
+    assert live[0].is_dir()
+
+    await room.destroy()
 
 
 # -- through a real SSH session ---------------------------------------------
