@@ -139,6 +139,11 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         self._pump: asyncio.Task[None] | None = None
         self._feeder: asyncio.Task[None] | None = None
         self._watchdog: asyncio.Task[None] | None = None
+        # The one teardown this session will ever run. Held as a task rather
+        # than run inline so that cancelling `_pump` cannot abort a destroy
+        # that is already under way — see `_begin_teardown`.
+        self._teardown: asyncio.Task[None] | None = None
+        self._status: int | None = None
         # Input is queued rather than written straight through: until `open()`
         # returns there is no room to write to, and the first thing a client
         # sends usually arrives during exactly that window.
@@ -201,27 +206,46 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         self._stop_feeder()
         if self._watchdog is not None:
             self._watchdog.cancel()
-        if self._room is not None:
-            room, self._room = self._room, None
-            asyncio.create_task(self._release_room(room))  # noqa: RUF006
-        else:
-            self._release()
+        self._begin_teardown(allow_keep=True)
 
-    async def _release_room(self, room: Room) -> None:
-        if self._kept is not None and self._kept.enabled:
-            try:
-                await self._kept.keep(self._username, room)
-                log.info(
-                    "room paused for %r (%.0fs to reconnect)",
-                    self._username,
-                    self._kept.window_seconds,
-                )
-                self._release()
+    def _begin_teardown(self, *, allow_keep: bool) -> asyncio.Task[None]:
+        """Start this session's teardown, or hand back the one already going.
+
+        Four paths can each decide the room should end — the pump finishing,
+        the client hanging up, the idle reaper, and a shutdown drain — and any
+        two of them can arrive together. Funnelling all four through one task
+        means the room is torn down exactly once, and, because every caller
+        gets that same task back to await, nobody walks away believing
+        teardown is finished while it is still running.
+
+        That second half is what shutdown depends on. `_release` is what tells
+        the drain a session is done, so releasing early lets `serve()` reach
+        `backend.close()` and process exit with a destroy still in flight —
+        which `asyncio.run` then cancels, leaving the room behind.
+        """
+        if self._teardown is None:
+            self._teardown = asyncio.create_task(self._run_teardown(allow_keep=allow_keep))
+        return self._teardown
+
+    async def _run_teardown(self, *, allow_keep: bool) -> None:
+        room, self._room = self._room, None
+        try:
+            if room is None:
                 return
-            except Exception:
-                log.exception("pause failed; destroying room instead")
-        await self._checkout(room)
-        self._release()
+            if allow_keep and self._kept is not None and self._kept.enabled:
+                try:
+                    await self._kept.keep(self._username, room)
+                    log.info(
+                        "room paused for %r (%.0fs to reconnect)",
+                        self._username,
+                        self._kept.window_seconds,
+                    )
+                    return
+                except Exception:
+                    log.exception("pause failed; destroying room instead")
+            self._status = await self._checkout(room)
+        finally:
+            self._release()
 
     def _release(self) -> None:
         # A drain loop watches this set shrink to know teardown is done —
@@ -254,6 +278,16 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
             chan.exit(1)
             return
 
+        if self._teardown is not None:
+            # The session ended while the room was still opening — a shutdown
+            # during a microVM boot is long enough for this to be ordinary.
+            # Teardown has already run and found no room to take, so this one
+            # would never be collected by anything else.
+            log.info("room opened after the session ended; destroying it")
+            room, self._room = self._room, None
+            await self._checkout(room)
+            return
+
         if kept is not None:
             chan.write(banner.resumed(self._room_cfg.name, self._room_cfg.image))
         else:
@@ -275,9 +309,16 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
             log.exception("room stream failed")
         finally:
             self._stop_feeder()
-            if self._room is not None:
-                status = await self._checkout(room)
-                self._room = None
+            # Whether the shell exiting is what ended this session, or whether
+            # something else got there first. Only the former has a checkout to
+            # announce: if the client already hung up, or a shutdown drain is
+            # tearing this down, the goodbye is both wrong and unreadable.
+            ours = self._teardown is None
+            # Awaited, not started and forgotten: the goodbye below reports
+            # the shell's exit status, which is not known until the room has
+            # actually been checked out.
+            await self._begin_teardown(allow_keep=False)
+            if ours and self._status is not None:
                 # `is_closing()` is not a guarantee the write will land: a
                 # channel can be past sending without yet reporting closing,
                 # which is exactly what a server shutdown racing this produces.
@@ -286,7 +327,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
                 try:
                     if not chan.is_closing():
                         chan.write(banner.destroyed("checked out"))
-                        chan.exit(status)
+                        chan.exit(self._status)
                 except (BrokenPipeError, ConnectionResetError, OSError):
                     log.debug("channel gone before checkout could be reported")
 
@@ -327,23 +368,21 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
     async def force_close(self) -> None:
         """Cut the session short once the shutdown grace period has expired.
 
-        Checks the room out here directly rather than leaving it to
-        `connection_lost` — mirrors `_idle_watchdog` below, so the caller can
-        await teardown finishing rather than just hoping asyncssh gets there.
+        Drives teardown here rather than leaving it to `connection_lost` — the
+        caller is a drain that has to know the room is really gone before the
+        process exits, so it needs something to await. A client that hung up
+        moments earlier already has a teardown running; this awaits that one
+        instead of starting a second.
         """
         chan = self._chan
         if chan is not None and not chan.is_closing():
             chan.write(banner.destroyed("server shutting down"))
 
-        if self._room is not None:
-            room, self._room = self._room, None
-            await self._checkout(room)
+        await self._begin_teardown(allow_keep=False)
 
         if chan is not None and not chan.is_closing():
             chan.exit(SHUTDOWN_EXIT_STATUS)
             chan.close()
-
-        self._release()
 
     # -- idle reaper ---------------------------------------------------------
 
@@ -369,9 +408,7 @@ class RoomSession(asyncssh.SSHServerSession[bytes]):
         if chan is not None and not chan.is_closing():
             chan.write(banner.destroyed("idle timeout"))
 
-        if self._room is not None:
-            room, self._room = self._room, None
-            await self._checkout(room)
+        await self._begin_teardown(allow_keep=False)
 
         if chan is not None and not chan.is_closing():
             chan.exit(IDLE_EXIT_STATUS)
