@@ -9,7 +9,7 @@
 
 <br>
 
-[![status](https://img.shields.io/badge/status-alpha-C9A227?style=flat-square&labelColor=1D1A26)](#status)
+[![status](https://img.shields.io/badge/status-stable-C9A227?style=flat-square&labelColor=1D1A26)](#status)
 [![license](https://img.shields.io/badge/license-MIT-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/LICENSE)
 [![python](https://img.shields.io/badge/python-3.11+-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/pyproject.toml)
 [![backend](https://img.shields.io/badge/docker%20%7C%20podman%20%7C%20firecracker-8B8397?style=flat-square&labelColor=1D1A26)](https://github.com/SamTruss/keycard/blob/main/USAGE.md#configuring-rooms)
@@ -149,9 +149,9 @@ v1 runs on containers, which is enough to keep your machine clean. Real isolatio
 ## Status
 
 > [!NOTE]
-> **Alpha.** Released and installable, but young — expect rough edges and occasional breaking changes before v1.0.
+> **1.0.** The configuration file, the CLI and the SSH-facing behaviour are now stable: they will not break on a minor release. See [what 1.0 promises](https://github.com/SamTruss/keycard/blob/main/CONTRIBUTING.md#what-10-promises).
 
-Building in the open. Issues and architectural pushback welcome while everything's still cheap to change.
+Still built in the open, and issues and architectural pushback are still welcome — 1.0 is a promise about compatibility, not a claim that the interesting work is finished. The microVM backend remains opt-in and its networking is [deliberately deferred](https://github.com/SamTruss/keycard/blob/main/FIRECRACKER.md).
 
 ---
 
@@ -295,7 +295,7 @@ Early enough that opinions are worth as much as commits. See [CONTRIBUTING.md](h
 <br>
 <sub>
 
-MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v0.2.4 &nbsp;·&nbsp; built in the terminal
+MIT © [Sam Truss](https://github.com/SamTruss) &nbsp;·&nbsp; v1.0.0 &nbsp;·&nbsp; built in the terminal
 
 </sub>
 </div>

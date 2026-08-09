@@ -54,12 +54,48 @@ These are the constraints the project is built around. PRs that cut against them
 
 **Security claims stay honest.** Don't describe the Docker backend as isolation or sandboxing in a security sense. The Firecracker backend does make a real claim now, and it is scoped to rooms with no network — if you change what a room can reach, the claim gets re-scoped in the same PR rather than quietly outgrown. See [SECURITY.md](SECURITY.md).
 
+## What 1.0 promises
+
+Versioning follows [Semantic Versioning](https://semver.org/). As of 1.0
+that stops being a formality: **the interfaces below will not break on a
+minor release.** A breaking change to any of them needs a major bump.
+
+Three things are covered, because they are the three ways anything outside
+this repository depends on keycard:
+
+1. **The configuration file.** Every key documented in
+   [keycard.example.toml](keycard.example.toml) — the top-level settings,
+   `[rooms.*]`, and the `[firecracker]` table. A key may gain values or
+   stop being required; it will not change meaning or disappear.
+2. **The command line.** `keycard up` and `keycard rooms`, their flags, and
+   the two reserved exit statuses (`124` idle-reaped, `143` shutdown).
+3. **The SSH-facing behaviour.** The username selects the room,
+   public-key authentication only, `exec` refused, one channel per
+   connection, and a room destroyed when the connection ends.
+
+Explicitly **not** covered, so that the promise stays worth something:
+
+- **The Python API.** `import keycard` gets you a version string. Nothing
+  under `keycard.*` is a supported library interface, and the backend
+  seam in particular is expected to keep moving.
+- **The microVM backend's completeness.** `backend = "firecracker"` is
+  stable in the sense above — its config keys and behaviour won't break —
+  but it is still opt-in and its networking is deliberately unbuilt. See
+  [FIRECRACKER.md](FIRECRACKER.md).
+- **Log output and human-readable messages.** Don't parse them.
+- **The security claims themselves**, which are governed by
+  [SECURITY.md](SECURITY.md) rather than by semver. If what a room can
+  reach changes, the claim gets re-scoped in the same PR — a narrowing
+  there is a correction, not a breaking change.
+
+The last pre-1.0 breaking change was refusing `--keep` on firecracker
+rooms, made deliberately before the freeze: it was the only outstanding
+question that could have forced a major bump afterwards.
+
 ## Releasing
 
-Versioning follows [Semantic Versioning](https://semver.org/): while keycard
-is pre-1.0, expect breaking changes on a minor bump. Every notable change
-belongs in [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` as it lands,
-not saved up for release day.
+Every notable change belongs in [CHANGELOG.md](CHANGELOG.md) under
+`## [Unreleased]` as it lands, not saved up for release day.
 
 To cut a release:
 

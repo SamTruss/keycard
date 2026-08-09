@@ -8,7 +8,22 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-09
+
+The configuration file, the CLI and the SSH-facing behaviour are now stable
+and will not break on a minor release. What is and is not covered by that is
+written out in [CONTRIBUTING.md](CONTRIBUTING.md#what-10-promises) — notably,
+`import keycard` is *not* a supported library interface.
+
+1.0 is a compatibility promise, not a claim that the work is finished. The
+microVM backend stays opt-in and its networking stays
+[deliberately deferred](FIRECRACKER.md).
+
 ### Changed
+
+- **`Development Status` is now `5 - Production/Stable`.** It had been
+  `2 - Pre-Alpha` since the first release, which was already two steps behind
+  what the README claimed by 0.2.4.
 
 - **`--keep` is now refused on the firecracker backend.** Pausing a microVM
   means snapshotting it, and a Firecracker snapshot dumps the whole of guest
