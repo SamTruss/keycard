@@ -549,3 +549,116 @@ async def test_resume_failure_destroys_the_claimed_room() -> None:
     assert chan.exit_status == 1
     assert room.destroy_kept_count == 1
     assert kept.take("alice") is None
+
+
+# -- shutdown racing an in-flight teardown -----------------------------------
+
+
+class GatedRoom(FakeRoom):
+    """A room whose teardown does not finish until the test lets it.
+
+    Both real backends take real time here — Docker polls the container for up
+    to a second before killing it, and a Firecracker `pause` writes the whole
+    of guest RAM to disk. A shutdown that arrives mid-teardown is therefore an
+    ordinary race, not a contrived one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.destroy_finished = 0
+        self.pause_finished = 0
+
+    async def destroy(self) -> int:
+        await self.gate.wait()
+        status = await super().destroy()
+        self.destroy_finished += 1
+        return status
+
+    async def pause(self) -> FakeKept:
+        await self.gate.wait()
+        kept = await super().pause()
+        self.pause_finished += 1
+        return kept
+
+
+@pytest.mark.timeout(5)
+async def test_drain_waits_for_a_teardown_already_in_flight() -> None:
+    """A session that dropped just before shutdown must still be waited on.
+
+    `connection_lost` hands the room to a background task, so between that
+    callback and the room actually being gone the session is still live. If
+    the drain treats `force_close` on such a session as complete, `serve()`
+    walks on to `backend.close()` and process exit while the destroy is still
+    running — and `asyncio.run` then cancels it, leaving the room behind. The
+    session must not leave the active set until its room really is gone.
+    """
+    from keycard.server import _drain
+
+    active = ActiveSessions()
+    room = GatedRoom()
+    chan = FakeChannel()
+    session = RoomSession(FakeBackend(room), RoomConfig(name="a", image="x"), active=active)
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.03)  # let _run open the room
+
+    # The client hangs up a moment before the drain reaches this session.
+    session.connection_lost(None)
+    await asyncio.sleep(0)  # let _release_room start and block on the gate
+
+    drain = asyncio.create_task(_drain(active, grace=0.0))
+    await asyncio.sleep(0.05)
+    assert not drain.done(), "drain returned while the room was still being destroyed"
+
+    room.gate.set()
+    await drain
+
+    assert room.destroy_finished == 1
+    assert not active
+
+    await _teardown(session)
+
+
+@pytest.mark.timeout(5)
+async def test_shutdown_does_not_lose_a_room_still_being_paused() -> None:
+    """The `--keep` half of the same race.
+
+    `_release_room` pauses the room and only then registers it as kept. A
+    drain that releases the session mid-pause lets `destroy_all` sweep an
+    empty registry, so the paused room — a container, or a microVM's RAM
+    written out to disk — is left with nothing owning it.
+    """
+    from keycard.server import _drain
+
+    active = ActiveSessions()
+    room = GatedRoom()
+    backend = FakeBackend(room)
+    kept = KeptRooms(backend, window_seconds=300.0)
+    chan = FakeChannel()
+    session = RoomSession(
+        backend,
+        RoomConfig(name="a", image="x"),
+        active=active,
+        username="alice",
+        kept=kept,
+    )
+    session.connection_made(chan)  # type: ignore[arg-type]
+    session.session_started()
+    await asyncio.sleep(0.03)
+
+    session.connection_lost(None)
+    await asyncio.sleep(0)  # _release_room is now blocked inside pause()
+
+    drain = asyncio.create_task(_drain(active, grace=0.0))
+    await asyncio.sleep(0.05)
+    room.gate.set()
+    await drain
+
+    # By the time the drain returns the pause must have landed, so the
+    # shutdown sweep that follows it has something to find.
+    assert room.pause_finished == 1
+    await kept.destroy_all()
+    assert room.destroy_kept_count == 1
+
+    await _teardown(session)

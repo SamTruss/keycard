@@ -8,6 +8,29 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A room could be left running by a shutdown that raced its own teardown.**
+  When a client disconnected moments before `shutdown_grace` expired, its
+  room was already being destroyed — or, under `--keep`, paused — on a
+  background task. `force_close()` saw the room detached, concluded there was
+  nothing to do, and released the session from the drain's registry while
+  that teardown was still in flight. The drain then returned, `serve()` ran
+  on to `backend.close()` and process exit, and `asyncio.run` cancelled the
+  unfinished destroy: a container left running, or a microVM's snapshot —
+  guest RAM, in the clear — left on disk with nothing owning it. Under
+  `--keep` the pause could also land *after* `KeptRooms.destroy_all()` had
+  already swept, so the shutdown sweep found an empty registry.
+
+  Teardown is now a single task per session: whichever trigger gets there
+  first owns it, and every other trigger awaits that same task instead of
+  racing it, so a session leaves the drain's registry only once its room is
+  genuinely gone. This also closes two narrower races of the same shape — the
+  read pump's `finally` and a shutdown arriving together could each start a
+  destroy, and a room that finished opening after its session had already
+  ended was never collected at all. Reachable on every backend and every
+  supported Python; the `--keep` half needs `keep_window` set.
+
 ## [0.2.1] - 2026-08-08
 
 Shipped immediately behind 0.2.0, which was tagged but never published to

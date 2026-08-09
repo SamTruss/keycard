@@ -113,10 +113,8 @@ to strip); it's the single biggest simplification available in
 ## The many ways a room ends
 
 This is the part most worth understanding before changing `session.py`. A
-room can be torn down from five different triggers, and they can race each
-other — `RoomSession` guards against double-teardown by nulling
-`self._room` in the *same synchronous step* that decides to act on it,
-before any `await`:
+room can be torn down from six different triggers, and they can race each
+other:
 
 | Trigger | Where | Result |
 |---|---|---|
@@ -127,26 +125,48 @@ before any `await`:
 | `--keep` window expires unclaimed | `KeptRooms._expire()` | Paused room destroyed, no client attached |
 | Server shuts down with rooms still paused | `KeptRooms.destroy_all()`, called from `serve()` | Every kept room swept, so none outlive the process |
 
+The first four all funnel into **one teardown task per session**:
+`_begin_teardown()` creates it if it does not exist and otherwise hands back
+the one already running, so whichever trigger arrives first owns the
+teardown and the rest await that same task.
+
 Two things make this safe rather than fragile:
 
-1. **`self._room = None` happens before the teardown call, not after.** Every
-   path does `room, self._room = self._room, None` and only then calls
-   `_checkout`/`pause`/etc. A second trigger racing in behind it sees
-   `self._room is None` and backs off instead of double-tearing-down.
-2. **`Room.destroy()` is independently idempotent** (`DockerRoom` guards it
-   with a lock and a `_destroyed` flag), as a second line of defence for
-   whatever the first guarantee doesn't catch.
+1. **Racing triggers wait, rather than backing off.** It is not enough to
+   stop a second trigger from tearing the room down twice — it must also not
+   walk away believing teardown is *finished* when the first one is still
+   inside `destroy()`. `RoomSession._release()` is what tells a shutdown
+   drain the session is done, so a trigger that returns early there lets
+   `serve()` reach `backend.close()` and process exit with a destroy still in
+   flight, which `asyncio.run` then cancels — leaving a container running or
+   a microVM's RAM written out to disk with nothing owning it. Every caller
+   getting the same awaitable task back is what closes that window, and
+   `_release()` fires in that task's `finally`, once.
+2. **`Room.destroy()` is independently idempotent** (`DockerRoom` and
+   `FirecrackerRoom` each guard it with a lock and a `_destroyed` flag), as a
+   second line of defence for whatever the first guarantee doesn't catch.
+
+Holding teardown as a *task* rather than running it inline matters for the
+same reason: `connection_lost` cancels `_pump`, and a destroy running inline
+inside that task's `finally` would be cancelled along with it.
 
 A clean shell exit and a dropped connection are deliberately *not* the same
 code path: `--keep` only pauses on the latter. Typing `exit` is a
-deliberate goodbye and always destroys, regardless of `--keep`.
+deliberate goodbye and always destroys, regardless of `--keep`. That is what
+`allow_keep` on `_begin_teardown` selects, and only `connection_lost` passes
+it — so whichever trigger wins the race also decides whether the room is
+eligible to be paused.
 
 Graceful shutdown (`server._drain`) and `--keep` interact with the same
 registries but don't know about each other: `_drain` only touches
 `ActiveSessions` (live connections), then `serve()` separately sweeps
-`KeptRooms` afterward. A session being force-closed during shutdown is
-never paused — that would mean a room outliving the process with nothing
-left to reap it if the server never comes back up.
+`KeptRooms` afterward. A session force-closed during shutdown is never
+paused — that would mean a room outliving the process with nothing left to
+reap it if the server never comes back up. A client that hung up moments
+*before* the drain reached it is the one exception: its teardown was already
+started with `allow_keep=True`, so it pauses, and `KeptRooms.destroy_all()`
+sweeps it a moment later. The ordering in `serve()` is what makes that safe —
+the drain waits for the pause to land, so the sweep that follows can see it.
 
 ## Configuration
 
