@@ -8,6 +8,8 @@ and versioning follows [Semantic Versioning](https://semver.org/) — see
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-09
+
 ### Security
 
 - **A crash used to leave a paused room's guest RAM on disk indefinitely.**
